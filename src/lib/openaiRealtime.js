@@ -549,6 +549,7 @@ export function useOpenAIRealtime({ audioRef, coords = null, onBalanceUpdate = n
 
     function detectMotion(ctx) {
       const mCtx = motionCanvas.getContext('2d')
+      if (!mCtx) return true // can't detect, assume motion
       mCtx.drawImage(video, 0, 0, 64, 48)
       const data = mCtx.getImageData(0, 0, 64, 48).data
       if (!prevPixels) { prevPixels = new Uint8Array(data); return true }
@@ -625,6 +626,12 @@ export function useOpenAIRealtime({ audioRef, coords = null, onBalanceUpdate = n
             visionContextRef.current.push(data.description)
             if (visionContextRef.current.length > 10) visionContextRef.current.shift()
           }
+        } else if (r.status === 402) {
+          // Out of credits — stop vision completely (camera light off)
+          console.warn('[vision] credits exhausted, stopping camera')
+          running = false
+          clearInterval(intervalId)
+          try { video.pause(); video.srcObject?.getTracks().forEach(t => t.stop()); video.srcObject = null } catch (_) {}
         }
       } catch (_) {}
       busy = false
