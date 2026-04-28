@@ -466,45 +466,77 @@ export function useOpenAIRealtime({ audioRef, coords = null, onBalanceUpdate = n
 
   useEffect(() => () => { stop() }, [stop])
 
-  // ── sendText — typed message through the data channel ──────────
+  // ── sendText — typed message through the REST pipeline ──────────
   const sendText = useCallback(async (text) => {
     if (!text || typeof text !== 'string') return
     const trimmed = text.trim()
     if (!trimmed) return
     appendTurn('user', trimmed, true)
     lastActivityAtRef.current = Date.now()
-
-    // If no session, start one first
-    if (!sessionActiveRef.current || !dcRef.current) {
-      await start({ textOnly: true })
-      // Wait for data channel to open
-      const deadline = Date.now() + 8000
-      while (Date.now() < deadline) {
-        if (dcRef.current && dcRef.current.readyState === 'open') break
-        if (statusRef.current === 'error') break
-        await new Promise(r => setTimeout(r, 150))
-      }
-    }
-
-    const dc = dcRef.current
-    if (!dc || dc.readyState !== 'open') {
-      setError('Connection not ready')
-      return
-    }
-
-    // Send text message via data channel
-    dc.send(JSON.stringify({
-      type: 'conversation.item.create',
-      item: {
-        type: 'message',
-        role: 'user',
-        content: [{ type: 'input_text', text: trimmed }],
-      },
-    }))
-    dc.send(JSON.stringify({ type: 'response.create' }))
     setStatus('thinking')
     statusRef.current = 'thinking'
-  }, [appendTurn, start])
+
+    try {
+      // Build conversation history from turns
+      const history = turns.map(t => ({ role: t.role, text: t.text })).slice(-20)
+
+      const r = await fetch('/api/realtime/pipeline', {
+        method: 'POST',
+        credentials: 'include',
+        headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+        body: JSON.stringify({
+          textOverride: trimmed,
+          history,
+          visionContext: visionContextRef.current.join('; '),
+        }),
+      })
+
+      if (!r.ok) {
+        const body = await r.json().catch(() => ({}))
+        throw new Error(body.error || `HTTP ${r.status}`)
+      }
+
+      const data = await r.json()
+
+      if (data.assistantText) {
+        appendTurn('assistant', data.assistantText, true)
+      }
+
+      // Play TTS audio if returned
+      if (data.audio && audioElRef.current) {
+        const audioBlob = new Blob(
+          [Uint8Array.from(atob(data.audio), c => c.charCodeAt(0))],
+          { type: `audio/${data.audioFormat || 'mp3'}` }
+        )
+        const url = URL.createObjectURL(audioBlob)
+        audioElRef.current.src = url
+        audioElRef.current.play().catch(() => {})
+        // Also connect to audioRef for lipsync
+        if (audioRef?.current && audioRef.current !== audioElRef.current) {
+          audioRef.current.src = url
+          audioRef.current.play().catch(() => {})
+        }
+      }
+
+      // Report tool calls
+      if (data.toolCalls?.length) {
+        for (const tc of data.toolCalls) {
+          appendTurn('assistant', `[tool: ${tc.name}]`, true)
+        }
+      }
+    } catch (err) {
+      console.error('[openai-rtc] sendText error:', err)
+      setError(err.message || 'Chat failed')
+    } finally {
+      if (sessionActiveRef.current) {
+        setStatus('listening')
+        statusRef.current = 'listening'
+      } else {
+        setStatus('idle')
+        statusRef.current = 'idle'
+      }
+    }
+  }, [appendTurn, turns, audioRef])
 
   // ── Camera ─────────────────────────────────────────────────────
   // Vision frames go to /api/realtime/vision (GPT-5.5) since WebRTC
