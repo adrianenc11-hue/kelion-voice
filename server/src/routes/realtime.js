@@ -1,7 +1,7 @@
 'use strict';
 
 const { Router } = require('express');
-const { listMemoryItems, getCreditsBalance, setPreferredLanguage, getPreferredLanguage } = require('../db');
+const { listMemoryItems, getCreditsBalance, addCreditsTransaction, setPreferredLanguage, getPreferredLanguage } = require('../db');
 
 // Adrian 2026-04-25: "default engleza e obligat sa detecteze limba user si o
 // va folosi permanent cit e logat". Mirror of the table in chat.js — keep in
@@ -1599,6 +1599,27 @@ router.post('/vision', async (req, res) => {
     return res.status(400).json({ error: 'Image too small or invalid' });
   }
 
+  // ── Vision credit billing ────────────────────────────────────────
+  // Batch 10 frames = 1 minute deduction (integer-safe for DB columns).
+  // Includes 30% markup over raw API cost.
+  // Admin users are exempt. Guests use trial quota (no deduction).
+  const FRAMES_PER_MINUTE = 10;
+  const user = peekSignedInUser(req);
+  const admin = await isAdminUser(user);
+  if (user && user.id && !admin) {
+    try {
+      const balance = await getCreditsBalance(user.id);
+      if (balance <= 0) {
+        return res.status(402).json({
+          error: 'Insufficient credits for vision',
+          balance: 0,
+        });
+      }
+    } catch (err) {
+      console.warn('[vision] balance check failed:', err.message);
+    }
+  }
+
   try {
     const { getOpenAI, getDefaultChatModel } = require('../utils/openai');
     const client = getOpenAI();
@@ -1629,6 +1650,24 @@ router.post('/vision', async (req, res) => {
     });
 
     const description = r.choices?.[0]?.message?.content || '';
+
+    // Deduct credits AFTER successful API call (not before).
+    // Track frames per user; deduct 1 minute every FRAMES_PER_MINUTE frames.
+    if (user && user.id && !admin) {
+      const key = `vision_frames_${user.id}`;
+      if (!global.visionFrameCounters) global.visionFrameCounters = {};
+      global.visionFrameCounters[key] = (global.visionFrameCounters[key] || 0) + 1;
+      if (global.visionFrameCounters[key] >= FRAMES_PER_MINUTE) {
+        global.visionFrameCounters[key] = 0;
+        addCreditsTransaction({
+          userId: user.id,
+          deltaMinutes: -1,
+          kind: 'vision',
+          note: `Vision: ${FRAMES_PER_MINUTE} frames analyzed`,
+        }).catch(err => console.warn('[vision] credit deduction failed:', err.message));
+      }
+    }
+
     return res.json({ ok: true, description });
   } catch (err) {
     // 400 = bad image from client (too small, unsupported format) — warn, not error.
