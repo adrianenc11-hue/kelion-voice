@@ -9,12 +9,12 @@ const { listMemoryItems, getCreditsBalance, addCreditsTransaction, setPreferredL
 const visionLimiter = (process.env.NODE_ENV === 'test')
   ? (req, res, next) => next()
   : rateLimit({
-      windowMs: 60 * 1000,
-      max: 300,
-      standardHeaders: true,
-      legacyHeaders: false,
-      message: { error: 'Vision rate limit exceeded.' },
-    });
+    windowMs: 60 * 1000,
+    max: 300,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { error: 'Vision rate limit exceeded.' },
+  });
 
 // Adrian 2026-04-25: "default engleza e obligat sa detecteze limba user si o
 // va folosi permanent cit e logat". Mirror of the table in chat.js — keep in
