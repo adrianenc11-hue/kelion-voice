@@ -222,6 +222,9 @@ function MonitorOverlay() {
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"><\/script>
 
 <style>
+  ${m.kind === 'map' ? `
+  body { margin: 0; padding: 0; background: #0d0b1d; overflow: hidden; }
+  ` : `
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
@@ -246,6 +249,7 @@ function MonitorOverlay() {
   th { background: rgba(124,58,237,0.2); color: #c4b5fd; }
   canvas { max-width: 100%; border-radius: 12px; }
   .chart-container { background: rgba(255,255,255,0.03); border: 1px solid rgba(167,139,250,0.15); border-radius: 12px; padding: 16px; margin: 16px 0; }
+  `}
 <\/style><\/head><body>${m.src}
 <script>
   // Auto-render KaTeX: $...$ inline, $$...$$ block
