@@ -1520,6 +1520,16 @@ export function useGeminiLive({ audioRef, coords = null, onBalanceUpdate = null,
     }
   }, [])
 
+  // setMicEnabled — disables/enables the microphone audio tracks without
+  // tearing down the WebSocket. When mic is off the session stays alive
+  // for text chat; re-enabling resumes voice input instantly.
+  const setMicEnabled = useCallback((enabled) => {
+    const stream = micStreamRef.current
+    if (stream) {
+      stream.getAudioTracks().forEach((t) => { t.enabled = !!enabled })
+    }
+  }, [])
+
   // sendText — sends a typed message through the live WebSocket as a
   // clientContent turn. The model responds with voice + transcript just
   // like a spoken turn. Enables the chat panel (⌨ button) to work.
@@ -1567,6 +1577,7 @@ export function useGeminiLive({ audioRef, coords = null, onBalanceUpdate = null,
     trial,
     isBusy,
     setMuted,
+    setMicEnabled,
     sendText,
     clearTurns,
     loadTurns,
