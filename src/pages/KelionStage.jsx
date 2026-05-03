@@ -989,6 +989,8 @@ export default function KelionStage() {
     stopScreen,
     // Mute/unmute voice output without restarting the session.
     setMuted: setVoiceMuted,
+    // Mic input toggle — disables audio tracks, keeps WS alive for text.
+    setMicEnabled,
     // Voice-chat trial countdown returned by the active transport's
     // token mint. We no longer drive the HUD off this — the HUD
     // pulls from the shared /api/trial/status endpoint so the timer
@@ -1002,6 +1004,12 @@ export default function KelionStage() {
   liveSendTextRef.current = liveSendText
   const startRef = useRef(null)
   startRef.current = start
+
+  // --- Mic mute (disables input, keeps session alive for text chat) ---
+  const [micOff, setMicOff] = useState(false)
+  useEffect(() => {
+    if (setMicEnabled) setMicEnabled(!micOff)
+  }, [micOff, setMicEnabled])
 
   // Chat bubble auto-hide — fade the on-stage bubble out after 8s of
   // quiet so the avatar isn't cluttered. Placed after useGeminiLive
@@ -1579,6 +1587,20 @@ export default function KelionStage() {
     catch (_) { /* banner surfaces failure */ }
   }, [start])
 
+  // --- Auto-start: launch session automatically on page load ---
+  // Fires once after mount. If the session is idle it starts voice.
+  // The user can then mute the mic (micOff) to go text-only.
+  const autoStartFiredRef = useRef(false)
+  useEffect(() => {
+    if (autoStartFiredRef.current) return
+    if (status === 'idle' && startRef.current) {
+      autoStartFiredRef.current = true
+      // Small delay to let the page fully render + avoid gesture issues
+      const t = setTimeout(() => startVoiceWithPriorTurns(), 800)
+      return () => clearTimeout(t)
+    }
+  }, [status, startVoiceWithPriorTurns])
+
   const onStageClick = useCallback(() => {
     if (menuOpen) return setMenuOpen(false)
     // First user gesture ? kick the geolocation permission prompt.
@@ -1986,9 +2008,12 @@ export default function KelionStage() {
         onClick={(e) => {
           e.stopPropagation()
           if (status === 'idle' || status === 'error') {
+            // Session not running — start it
             startVoiceWithPriorTurns()
+            setMicOff(false)
           } else {
-            stop()
+            // Session running — toggle mic on/off (keep session alive)
+            setMicOff((v) => !v)
           }
         }}
         style={{
@@ -1997,9 +2022,17 @@ export default function KelionStage() {
           display: 'flex', alignItems: 'center', gap: '10px',
           padding: '10px 24px',
           borderRadius: 999,
-          background: (status === 'idle' || status === 'error') ? 'rgba(30, 30, 40, 0.65)' : 'linear-gradient(135deg, #7c3aed, #a78bfa)',
+          background: (status === 'idle' || status === 'error')
+            ? 'rgba(30, 30, 40, 0.65)'
+            : micOff
+              ? 'rgba(239, 68, 68, 0.25)'
+              : 'linear-gradient(135deg, #7c3aed, #a78bfa)',
           backdropFilter: 'blur(12px)',
-          border: (status === 'idle' || status === 'error') ? '1px solid rgba(255, 255, 255, 0.1)' : '1px solid #c4b5fd',
+          border: (status === 'idle' || status === 'error')
+            ? '1px solid rgba(255, 255, 255, 0.1)'
+            : micOff
+              ? '1px solid rgba(239, 68, 68, 0.5)'
+              : '1px solid #c4b5fd',
           color: (status === 'idle' || status === 'error') ? '#9ca3af' : '#ffffff',
           fontSize: 15, fontFamily: 'system-ui, -apple-system, sans-serif',
           fontWeight: 600,
@@ -2007,17 +2040,21 @@ export default function KelionStage() {
           cursor: 'pointer',
           pointerEvents: 'auto',
           zIndex: bottomZIndex || 50,
-          boxShadow: (status === 'idle' || status === 'error') ? 'none' : '0 0 20px rgba(139, 92, 246, 0.5)',
+          boxShadow: (status === 'idle' || status === 'error')
+            ? 'none'
+            : micOff
+              ? '0 0 20px rgba(239, 68, 68, 0.3)'
+              : '0 0 20px rgba(139, 92, 246, 0.5)',
         }}
-        aria-label={(status === 'idle' || status === 'error') ? t('micOff') : t('micOn')}
+        aria-label={(status === 'idle' || status === 'error') ? t('micOff') : micOff ? 'Mic OFF — text chat active' : t('micOn')}
       >
         <span style={{
           width: 10, height: 10, borderRadius: '50%',
-          background: (status === 'idle' || status === 'error') ? '#6b7280' : '#ffffff',
-          boxShadow: (status === 'idle' || status === 'error') ? 'none' : '0 0 8px #ffffff',
+          background: (status === 'idle' || status === 'error') ? '#6b7280' : micOff ? '#ef4444' : '#ffffff',
+          boxShadow: (status === 'idle' || status === 'error') ? 'none' : micOff ? '0 0 8px #ef4444' : '0 0 8px #ffffff',
         }} />
-        {/* Audio level bargraph */}
-        {!(status === 'idle' || status === 'error') && (
+        {/* Audio level bargraph — hidden when mic is off */}
+        {!(status === 'idle' || status === 'error') && !micOff && (
           <span style={{ display: 'flex', alignItems: 'flex-end', gap: 2, height: 16 }}>
             {[0.3, 0.6, 1.0, 0.7, 0.4].map((scale, i) => {
               const level = Math.min(1, (userLevel || 0) * scale)
@@ -2030,7 +2067,11 @@ export default function KelionStage() {
             })}
           </span>
         )}
-        {(status === 'idle' || status === 'error') ? t('micOff') : t('micOn')}
+        {(status === 'idle' || status === 'error')
+          ? t('micOff')
+          : micOff
+            ? '🔇 MIC OFF'
+            : t('micOn')}
       </button>
       {/* Voice mode label under the main button */}
       {!(status === 'idle' || status === 'error') && (
