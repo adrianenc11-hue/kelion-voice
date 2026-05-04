@@ -837,6 +837,73 @@ export function useGeminiLive({ audioRef, coords = null, onBalanceUpdate = null,
         setTrial(null)
       }
 
+      if (tokenBody?.model?.includes('gemma') || tokenBody?.model?.includes('llama') || tokenBody?.model?.includes('deepseek')) {
+        // OpenRouter REST Voice Mode
+        console.log('[geminiLive] OpenRouter model detected, switching to REST Voice Mode');
+        startInFlightRef.current = false;
+        
+        // Stop the continuous mic stream that was started for WebRTC
+        if (micStreamRef.current) {
+          micStreamRef.current.getTracks().forEach(t => t.stop());
+          micStreamRef.current = null;
+        }
+
+        const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (!SR) {
+          throw new Error('Browserul tău nu suportă recunoașterea vocală (Speech-to-Text). Vă rugăm să folosiți Chrome.');
+        }
+
+        const rec = new SR();
+        rec.continuous = false;
+        rec.interimResults = false;
+        rec.lang = navigator.language || 'ro-RO';
+        
+        rec.onresult = async (ev) => {
+          const transcript = ev.results[0][0].transcript;
+          if (!transcript) {
+            setStatus('idle');
+            return;
+          }
+          
+          let base64Image = null;
+          if (cameraStreamRef.current) {
+            try {
+              const track = cameraStreamRef.current.getVideoTracks()[0];
+              const imageCapture = new ImageCapture(track);
+              const bitmap = await imageCapture.grabFrame();
+              const canvas = document.createElement('canvas');
+              canvas.width = bitmap.width;
+              canvas.height = bitmap.height;
+              const ctx = canvas.getContext('2d');
+              ctx.drawImage(bitmap, 0, 0);
+              base64Image = canvas.toDataURL('image/jpeg');
+            } catch(e) { console.error('[geminiLive] Vision frame error', e); }
+          }
+          
+          // Use the enhanced sendText which supports images and audio playback!
+          await sendText(transcript, base64Image, true);
+        };
+        
+        rec.onerror = (ev) => {
+          if (ev.error !== 'no-speech') {
+            setError('Microphone error: ' + ev.error);
+            setStatus('error');
+          } else {
+            setStatus('idle');
+          }
+        };
+        
+        rec.onend = () => {
+          if (statusRef.current === 'listening') {
+            setStatus('idle');
+          }
+        };
+        
+        setStatus('listening');
+        rec.start();
+        return;
+      }
+
       // 3. Connect WebSocket on the `BidiGenerateContentConstrained` endpoint.
       // Verified against the official @google/genai SDK v1.37.0 source
       // (src/live.ts lines 164-179): whenever the apiKey starts with
@@ -1535,15 +1602,15 @@ export function useGeminiLive({ audioRef, coords = null, onBalanceUpdate = null,
   // sendText — sends a typed message through the live WebSocket as a
   // clientContent turn. The model responds with voice + transcript just
   // like a spoken turn. Enables the chat panel (⌨ button) to work.
-  const sendText = useCallback(async (text) => {
+  const sendText = useCallback(async (text, image = null, playAudio = false) => {
     const clean = (text || '').trim()
-    if (!clean) return
+    if (!clean && !image) return
     userHasSpokenRef.current = true
-    appendTurn('user', clean, true, '⌨️ Keyboard')
-    logAiEvent('text_sent', { text: clean })
+    if (clean) appendTurn('user', clean, true, playAudio ? '🎤 Voice' : '⌨️ Keyboard')
+    if (clean) logAiEvent('text_sent', { text: clean })
 
     const ws = wsRef.current
-    if (ws && ws.readyState === WebSocket.OPEN) {
+    if (ws && ws.readyState === WebSocket.OPEN && !playAudio) {
       // Live WebSocket path
       try {
         ws.send(JSON.stringify({
@@ -1557,31 +1624,99 @@ export function useGeminiLive({ audioRef, coords = null, onBalanceUpdate = null,
         console.error('[geminiLive] sendText failed', err)
       }
     } else {
-      // HTTP fallback — Gemma 4 text chat via /api/chat
+      // HTTP fallback — Gemma 4 text/voice chat via /api/chat
       setStatus('thinking')
       try {
-        const r = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
-          credentials: 'include',
-          body: JSON.stringify({ message: clean }),
-        })
-        if (!r.ok) {
-          const err = await r.json().catch(() => ({ error: 'Chat failed' }))
-          appendTurn('assistant', err.error || 'Sorry, something went wrong.', true)
-          setStatus('idle')
-          return
+        let currentMessage = clean;
+        let currentImage = image;
+        let toolResponses = undefined;
+        let maxLoops = 5;
+        let finalReply = '';
+        let finalModel = '';
+        
+        while (maxLoops-- > 0) {
+          const r = await fetch('/api/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+            credentials: 'include',
+            body: JSON.stringify({ message: currentMessage, sessionId: wsSessionIdRef.current, toolResponses, image: currentImage }),
+          })
+          if (!r.ok) {
+            const err = await r.json().catch(() => ({ error: 'Chat failed' }))
+            finalReply = err.error || 'Sorry, something went wrong.';
+            break;
+          }
+          const data = await r.json()
+          
+          if (data.toolCalls && data.toolCalls.length > 0) {
+            const results = [];
+            for (const call of data.toolCalls) {
+              const res = await runTool(call.name, call.args);
+              results.push({ name: call.name, response: res });
+            }
+            toolResponses = results;
+            currentMessage = undefined; // Do not send message again
+            currentImage = undefined;
+            continue; // Loop back to send toolResponses
+          }
+          
+          finalReply = data.reply || 'No response.';
+          finalModel = data.model;
+          break;
         }
-        const data = await r.json()
-        appendTurn('assistant', data.reply || 'No response.', true, data.model ? `🤖 ${data.model}` : undefined)
-        setStatus('idle')
+        appendTurn('assistant', finalReply, true, finalModel ? `🤖 ${finalModel}` : undefined)
+        
+        if (playAudio || isClonedVoiceActive()) {
+          setStatus('speaking')
+          try {
+            const r = await fetch('/api/voice/clone/tts', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': getCsrfToken() },
+              credentials: 'include',
+              body: JSON.stringify({ text: finalReply }),
+            })
+            if (r.ok) {
+              const audioData = await r.arrayBuffer()
+              const blob = new Blob([audioData], { type: 'audio/mpeg' })
+              const blobUrl = URL.createObjectURL(blob)
+              
+              if (audioRef.current) {
+                const prevMuted = audioRef.current.muted
+                const prevSrcObject = audioRef.current.srcObject
+                audioRef.current.srcObject = null
+                audioRef.current.src = blobUrl
+                audioRef.current.muted = false
+                audioRef.current.volume = 1.0
+                audioRef.current.onended = () => {
+                  URL.revokeObjectURL(blobUrl)
+                  audioRef.current.src = ''
+                  audioRef.current.srcObject = prevSrcObject
+                  audioRef.current.muted = prevMuted
+                  setStatus('idle')
+                }
+                await audioRef.current.play().catch(() => setStatus('idle'))
+              } else {
+                const fallback = new Audio(blobUrl)
+                fallback.onended = () => { URL.revokeObjectURL(blobUrl); setStatus('idle') }
+                fallback.play().catch(() => setStatus('idle'))
+              }
+            } else {
+              setStatus('idle')
+            }
+          } catch(e) {
+            console.error('TTS failed', e)
+            setStatus('idle')
+          }
+        } else {
+          setStatus('idle')
+        }
       } catch (err) {
         console.error('[geminiLive] HTTP chat fallback failed', err)
         appendTurn('assistant', 'Connection error. Please try again.', true)
         setStatus('idle')
       }
     }
-  }, [appendTurn])
+  }, [appendTurn, audioRef])
 
   // Allow the parent to clear or seed the transcript (used by history
   // load, new-conversation, sign-out). Avoids duplicating state.
