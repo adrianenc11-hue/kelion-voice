@@ -9,6 +9,7 @@ const { Router } = require('express');
 const { trialStatus, stampTrialIfFresh } = require('../services/trialQuota');
 const { peekSignedInUser, isAdminUser } = require('../middleware/optionalAuth');
 const ipGeo = require('../services/ipGeo');
+const { buildKelionToolsGemini } = require('./realtime');
 
 const router = Router();
 
@@ -50,9 +51,9 @@ router.post('/', async (req, res) => {
       await stampTrialIfFresh(guestIp, trial);
     }
 
-    const { message, sessionId } = req.body || {};
-    if (!message || typeof message !== 'string' || !message.trim()) {
-      return res.status(400).json({ error: 'message is required' });
+    const { message, sessionId, toolResponses, image } = req.body || {};
+    if (!message && !toolResponses) {
+      return res.status(400).json({ error: 'message or toolResponses is required' });
     }
 
     // Session history
@@ -63,60 +64,141 @@ router.post('/', async (req, res) => {
     const session = sessions.get(sid);
     session.lastUsed = Date.now();
 
-    // Add user message to history
-    session.history.push({ role: 'user', parts: [{ text: message.trim() }] });
+    // Add user message or function responses to history
+    if (toolResponses) {
+      session.history.push({
+        role: 'function',
+        parts: toolResponses.map(tr => ({
+          functionResponse: {
+            name: tr.name,
+            response: { result: tr.response }
+          }
+        }))
+      });
+    } else if (message) {
+      const parts = [{ text: message.trim() }];
+      if (image) {
+        // image should be base64 string
+        parts.push({
+          inlineData: { mimeType: 'image/jpeg', data: image.replace(/^data:image\/\w+;base64,/, '') }
+        });
+      }
+      session.history.push({ role: 'user', parts });
+    }
+
     if (session.history.length > MAX_HISTORY * 2) {
       session.history = session.history.slice(-MAX_HISTORY * 2);
     }
 
-    // Model: prefer Gemma 4, fallback to Gemini Flash
-    const model = process.env.CHAT_MODEL || 'gemma-4-31b-it';
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    // Model: prefer Gemma 4 on OpenRouter
+    const model = process.env.CHAT_MODEL || process.env.OPENROUTER_MODEL || 'google/gemma-3-27b-it';
+    const url = 'https://openrouter.ai/api/v1/chat/completions';
+    const orKey = process.env.OPENROUTER_API_KEY;
+    if (!orKey) {
+      return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
+    }
+
+    const { buildKelionToolsChatCompletions } = require('./realtime');
+    const openRouterTools = buildKelionToolsChatCompletions();
+
+    // Convert Gemini history to OpenAI format
+    const messages = [
+      {
+        role: 'system',
+        content: `You are Kelion, a friendly conversational AI assistant. You always respond directly and naturally to the user.
+Important: You must always reply in the exact same language that the user uses.
+Your replies must be direct, conversational, and concise.`
+      }
+    ];
+
+    for (const h of session.history) {
+      if (h.role === 'user') {
+        const content = [];
+        for (const p of h.parts) {
+          if (p.text) content.push({ type: 'text', text: p.text });
+          if (p.inlineData) {
+            content.push({ 
+              type: 'image_url', 
+              image_url: { url: `data:${p.inlineData.mimeType};base64,${p.inlineData.data}` }
+            });
+          }
+        }
+        messages.push({ role: 'user', content });
+      } else if (h.role === 'model') {
+        if (h.parts[0].functionCall) {
+          messages.push({
+            role: 'assistant',
+            content: null,
+            tool_calls: [{
+              type: 'function',
+              function: {
+                name: h.parts[0].functionCall.name,
+                arguments: JSON.stringify(h.parts[0].functionCall.args)
+              }
+            }]
+          });
+        } else {
+          messages.push({ role: 'assistant', content: h.parts[0].text || '' });
+        }
+      } else if (h.role === 'function') {
+        const fr = h.parts[0].functionResponse;
+        messages.push({
+          role: 'tool',
+          name: fr.name,
+          content: JSON.stringify(fr.response)
+        });
+      }
+    }
 
     const body = {
-      contents: session.history,
-      systemInstruction: {
-        parts: [{
-          text: `You are Kelion, a friendly and intelligent AI assistant. CRITICAL LANGUAGE RULE: Automatically detect the language the user writes in and ALWAYS respond in that same language. If the user writes in Romanian, respond in Romanian. If in Spanish, respond in Spanish. If you cannot detect the language or the user hasn't written yet, default to English. Never mix languages in a response. Be helpful, warm, and conversational. Keep responses concise but informative.`
-        }]
-      },
-      generationConfig: {
-        temperature: 0.7,
-        maxOutputTokens: 1024,
-      },
+      model,
+      messages,
+      tools: openRouterTools,
+      temperature: 0.7,
+      max_tokens: 1024,
     };
 
     const r = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${orKey}`,
+        'HTTP-Referer': 'https://kelion.ai',
+        'X-Title': 'Kelion AI'
+      },
       body: JSON.stringify(body),
     });
 
     if (!r.ok) {
       const errText = await r.text();
-      console.error('[chat] Gemma 4 generateContent failed:', r.status, errText.slice(0, 500));
-      // Fallback model if primary fails
-      const fallbackModel = process.env.GEMINI_FALLBACK_MODEL || 'gemma-4-26b-a4b-it';
-      if (model !== fallbackModel) {
-        const fallbackUrl = `https://generativelanguage.googleapis.com/v1beta/models/${fallbackModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
-        const r2 = await fetch(fallbackUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        });
-        if (r2.ok) {
-          const data = await r2.json();
-          const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.';
-          session.history.push({ role: 'model', parts: [{ text: reply }] });
-          return res.json({ reply, model: fallbackModel, fallback: true });
-        }
-      }
+      console.error('[chat] OpenRouter generation failed:', r.status, errText.slice(0, 500));
       return res.status(500).json({ error: 'AI generation failed' });
     }
 
     const data = await r.json();
-    const reply = data.candidates?.[0]?.content?.parts?.[0]?.text || 'Sorry, I could not generate a response.';
+    const choice = data.choices?.[0]?.message;
 
+    if (!choice) {
+      return res.status(500).json({ error: 'Invalid response from OpenRouter' });
+    }
+
+    if (choice.tool_calls && choice.tool_calls.length > 0) {
+      const toolCalls = choice.tool_calls.map(tc => {
+        let args = {};
+        try { args = JSON.parse(tc.function.arguments); } catch(e){}
+        return { name: tc.function.name, args };
+      });
+      
+      // Save the model's turn so history is valid
+      session.history.push({ 
+        role: 'model', 
+        parts: toolCalls.map(tc => ({ functionCall: tc })) 
+      });
+      return res.json({ toolCalls, model });
+    }
+
+    const reply = choice.content || 'Sorry, I could not generate a response.';
+    
     // Add assistant response to history
     session.history.push({ role: 'model', parts: [{ text: reply }] });
 
