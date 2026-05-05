@@ -28,9 +28,9 @@ setInterval(() => {
 
 router.post('/', async (req, res) => {
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      return res.status(503).json({ error: 'GEMINI_API_KEY not configured' });
+    const orKey = process.env.OPENROUTER_API_KEY;
+    if (!orKey) {
+      return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
     }
 
     // Auth / trial gating (same logic as realtime)
@@ -71,7 +71,8 @@ router.post('/', async (req, res) => {
         parts: toolResponses.map(tr => ({
           functionResponse: {
             name: tr.name,
-            response: { result: tr.response }
+            response: { result: tr.response },
+            id: tr.id
           }
         }))
       });
@@ -93,10 +94,6 @@ router.post('/', async (req, res) => {
     // Model: Gemma 4 31B via OpenRouter — supports tool_calls natively.
     const model = process.env.CHAT_MODEL || process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it';
     const url = 'https://openrouter.ai/api/v1/chat/completions';
-    const orKey = process.env.OPENROUTER_API_KEY;
-    if (!orKey) {
-      return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
-    }
 
     const { buildKelionToolsChatCompletions } = require('./realtime');
     // Inject the coordinates into the tools builder if the backend supports it,
@@ -136,7 +133,7 @@ Your replies must be direct, conversational, and concise.${locationContext}`
         for (const p of h.parts) {
           if (p.functionCall) {
             tool_calls.push({
-              id: `call_${p.functionCall.name}`,
+              id: p.functionCall.id || `call_${p.functionCall.name}`,
               type: 'function',
               function: {
                 name: p.functionCall.name,
@@ -162,7 +159,7 @@ Your replies must be direct, conversational, and concise.${locationContext}`
           if (p.functionResponse) {
             messages.push({
               role: 'tool',
-              tool_call_id: `call_${p.functionResponse.name}`,
+              tool_call_id: p.functionResponse.id || `call_${p.functionResponse.name}`,
               name: p.functionResponse.name,
               content: JSON.stringify(p.functionResponse.response)
             });
@@ -219,7 +216,7 @@ Your replies must be direct, conversational, and concise.${locationContext}`
       const toolCalls = choice.tool_calls.map(tc => {
         let args = {};
         try { args = JSON.parse(tc.function.arguments); } catch(e){}
-        return { name: tc.function.name, args };
+        return { name: tc.function.name, args, id: tc.id };
       });
       
       // Save the model's turn so history is valid

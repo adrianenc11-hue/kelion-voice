@@ -1628,8 +1628,8 @@ router.post('/pipeline', async (req, res) => {
   if (!textOverride) return res.status(400).json({ error: 'No text provided' });
 
   try {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) return res.status(503).json({ error: 'GEMINI_API_KEY not configured' });
+    const openRouterKey = process.env.OPENROUTER_API_KEY;
+    if (!openRouterKey) return res.status(503).json({ error: 'OPENROUTER_API_KEY not configured' });
 
     const userText = (typeof textOverride === 'string' ? textOverride : '').trim();
     if (!userText) {
@@ -1674,7 +1674,6 @@ router.post('/pipeline', async (req, res) => {
     // Build tools in OpenAI format
     const openRouterTools = buildKelionToolsChatCompletions();
 
-    const openRouterKey = process.env.OPENROUTER_API_KEY || apiKey; // Fallback to process.env if needed, but we will add OPENROUTER_API_KEY to .env
     const chatModel = process.env.OPENROUTER_MODEL || 'google/gemma-4-31b-it';
     const url = 'https://openrouter.ai/api/v1/chat/completions';
 

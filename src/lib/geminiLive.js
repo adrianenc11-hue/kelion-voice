@@ -1671,7 +1671,7 @@ export function useGeminiLive({ audioRef, coords = null, onBalanceUpdate = null,
             const results = [];
             for (const call of data.toolCalls) {
               const res = await runTool(call.name, call.args);
-              results.push({ name: call.name, response: res });
+              results.push({ name: call.name, response: res, id: call.id });
             }
             toolResponses = results;
             currentMessage = undefined; // Do not send message again
@@ -1707,7 +1707,8 @@ export function useGeminiLive({ audioRef, coords = null, onBalanceUpdate = null,
               const blob = new Blob([audioData], { type: 'audio/mpeg' })
               const blobUrl = URL.createObjectURL(blob)
               
-              const audioEl = new window.Audio(blobUrl)
+              const audioEl = (audioRef && audioRef.current) ? audioRef.current : new window.Audio();
+              audioEl.src = blobUrl;
               audioEl.onended = () => {
                 URL.revokeObjectURL(blobUrl)
                 setStatus('idle')

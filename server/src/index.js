@@ -107,12 +107,12 @@ app.use(
   helmet({
     contentSecurityPolicy: {
       directives: {
-        defaultSrc: ["'self'"],
-        baseUri:    ["'self'", "https:"],
-        scriptSrc:  ["'self'", "'unsafe-inline'", "'wasm-unsafe-eval'", "blob:", "https://unpkg.com", "https://cdn.jsdelivr.net"],
-        styleSrc:   ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com", "https://unpkg.com", "https://cdn.jsdelivr.net"],
-        fontSrc:    ["'self'", "https://fonts.gstatic.com"],
-        imgSrc:     ["'self'", "data:", "blob:", "https:"],
+        defaultSrc: ["'self'", "https:", "http:", "data:", "blob:"],
+        baseUri:    ["'self'", "https:", "http:"],
+        scriptSrc:  ["'self'", "'unsafe-inline'", "'unsafe-eval'", "'wasm-unsafe-eval'", "blob:", "https:", "http:"],
+        styleSrc:   ["'self'", "'unsafe-inline'", "https:", "http:"],
+        fontSrc:    ["'self'", "data:", "https:", "http:"],
+        imgSrc:     ["'self'", "data:", "blob:", "https:", "http:"],
         connectSrc: ["'self'", "https://generativelanguage.googleapis.com", "wss://generativelanguage.googleapis.com", "https://raw.githack.com", "https://*.githubusercontent.com", "blob:", "https:", "wss:"],
         mediaSrc:   ["'self'", "blob:"],
         workerSrc:  ["'self'", "blob:"],
