@@ -3797,6 +3797,8 @@ async function toolConversationSummary(args, ctx) {
   } catch (err) {
     return { ok: false, error: err.message };
   }
+}
+
 // 0.6 — thinking_mode: Visible chain-of-thought reasoning.
 // Routes to OpenRouter with a "think step-by-step" wrapper and returns
 // both the reasoning steps and the final answer, so the UI can display them.
