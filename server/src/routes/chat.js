@@ -98,18 +98,10 @@ router.post('/', async (req, res) => {
     // ── Demand-driven tool activation ─────────────────────────────────
     // Default: all tools OFF. Activate only tools relevant to this
     // specific message. After the request completes, tools go back to OFF.
-    const { selectTools } = require('../services/toolRouter');
     const { KELION_TOOLS } = require('./realtime');
-    let relevantTools = [];
-    let categories = [];
-    if (isAdmin) {
-      relevantTools = KELION_TOOLS;
-      categories = ['ALL_TOOLS_ADMIN'];
-    } else {
-      const selection = selectTools(message, KELION_TOOLS);
-      relevantTools = selection.tools;
-      categories = selection.categories;
-    }
+    // Provide ALL tools natively so the LLM has full semantic understanding.
+    // No more artificial keyword filters.
+    let relevantTools = KELION_TOOLS;
     const openRouterTools = relevantTools.map(t => ({
       type: 'function',
       function: {
@@ -118,11 +110,7 @@ router.post('/', async (req, res) => {
         parameters: { type: 'object', properties: t.properties, required: t.required },
       },
     }));
-    if (categories.length) {
-      console.log(`[chat] toolRouter activated ${openRouterTools.length} tools for [${categories.join(', ')}]`);
-    } else {
-      console.log('[chat] toolRouter: no tools needed (simple chat)');
-    }
+    console.log(`[chat] Native mode: passed all ${openRouterTools.length} tools to LLM.`);
 
     const locationContext = (lat && lon)
       ? `\n\n[SYSTEM CONTEXT: The user's current GPS coordinates are: Latitude ${lat}, Longitude ${lon}. If asked about location, weather, or directions, you have access to this.]`
