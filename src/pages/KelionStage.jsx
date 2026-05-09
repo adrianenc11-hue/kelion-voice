@@ -1795,11 +1795,9 @@ export default function KelionStage() {
                 )}
               </div>
             ))}
-            {status === 'thinking' && (<div style={{ display: 'inline-flex', gap: 4, padding: '12px 18px', alignSelf: 'flex-start' }}><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bbb', animation: 'pulse 1.4s ease-in-out infinite' }} /><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bbb', animation: 'pulse 1.4s ease-in-out 0.2s infinite' }} /><span style={{ width: 8, height: 8, borderRadius: '50%', background: '#bbb', animation: 'pulse 1.4s ease-in-out 0.4s infinite' }} /></div>)}
-              </form>
-            <div style={{ textAlign: 'center', fontSize: 11, color: '#bbb', marginTop: 6 }}>Kelion can make mistakes. Consider verifying important information.</div>
-            </div>
-            </div>
+            {chatError && (<div style={{ padding: '8px 16px', borderRadius: 10, background: '#fef2f2', color: '#dc2626', fontSize: 14, alignSelf: 'center' }}>{chatError}</div>)}
+          </div>
+          </div>
             {/* Back Face (Monitor) */}
             <div style={{
               position: 'absolute', top: 0, left: 0, width: '100%', height: '100%',
