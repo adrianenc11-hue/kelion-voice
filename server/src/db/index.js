@@ -493,6 +493,29 @@ async function initDb() {
   await db.exec('CREATE INDEX IF NOT EXISTS idx_demo_requests_email ON demo_requests(email)');
   await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_demo_requests_code ON demo_requests(demo_code) WHERE demo_code IS NOT NULL');
 
+  // Multi-voice clone library — stores all cloned voices per user.
+  // Replaces the single-voice-per-user model (users.cloned_voice_id).
+  // Each row is one ElevenLabs cloned voice with its display name,
+  // language preference, and consent metadata. The `is_active` flag
+  // marks which clone the TTS endpoint should use. Only one clone
+  // can be active at a time (enforced in code, not DB constraint).
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS voice_clones (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      voice_id TEXT NOT NULL,
+      display_name TEXT NOT NULL DEFAULT 'Unnamed Voice',
+      language TEXT DEFAULT 'auto',
+      is_active INTEGER NOT NULL DEFAULT 0,
+      consent_version TEXT,
+      consent_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
+  `);
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_voice_clones_user ON voice_clones(user_id)');
+  await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_voice_clones_voice ON voice_clones(user_id, voice_id)');
+
   return db;
 }
 
@@ -744,6 +767,98 @@ async function listVoiceCloneEvents(userId, limit = 50) {
        FROM voice_clone_events WHERE user_id = ? ORDER BY id DESC LIMIT ?`,
     [userId, limit]
   );
+}
+
+// ─── Multi-voice clone library helpers ────────────────────────────
+// Supports multiple cloned voices per user with display names,
+// language preferences, and active selection.
+
+async function addVoiceClone(userId, { voiceId, displayName, language, consentVersion }) {
+  if (!userId || !voiceId) return null;
+  const name = (displayName || 'Unnamed Voice').slice(0, 100);
+  const lang = (language || 'auto').slice(0, 10);
+  // Upsert — if this voiceId already exists for the user, update it
+  const existing = await db.get(
+    'SELECT id FROM voice_clones WHERE user_id = ? AND voice_id = ?',
+    [userId, voiceId]
+  );
+  if (existing) {
+    await db.run(
+      `UPDATE voice_clones SET display_name = ?, language = ?, consent_version = ? WHERE id = ?`,
+      [name, lang, consentVersion || null, existing.id]
+    );
+    return { id: existing.id, voice_id: voiceId, display_name: name, language: lang };
+  }
+  const r = await db.run(
+    `INSERT INTO voice_clones (user_id, voice_id, display_name, language, consent_version)
+     VALUES (?, ?, ?, ?, ?)`,
+    [userId, voiceId, name, lang, consentVersion || null]
+  );
+  return { id: r.lastID, voice_id: voiceId, display_name: name, language: lang };
+}
+
+async function listVoiceClones(userId) {
+  if (!userId) return [];
+  return db.all(
+    `SELECT id, voice_id, display_name, language, is_active, consent_version, consent_at, created_at
+       FROM voice_clones WHERE user_id = ? ORDER BY created_at DESC`,
+    [userId]
+  );
+}
+
+async function deleteVoiceCloneById(userId, cloneId) {
+  if (!userId || !cloneId) return false;
+  const r = await db.run(
+    'DELETE FROM voice_clones WHERE id = ? AND user_id = ?',
+    [cloneId, userId]
+  );
+  return r.changes > 0;
+}
+
+async function setActiveVoiceClone(userId, cloneId) {
+  if (!userId) return null;
+  // Deactivate all clones for this user first
+  await db.run('UPDATE voice_clones SET is_active = 0 WHERE user_id = ?', [userId]);
+  if (cloneId) {
+    // Activate the selected one
+    await db.run(
+      'UPDATE voice_clones SET is_active = 1 WHERE id = ? AND user_id = ?',
+      [cloneId, userId]
+    );
+  }
+  // Return the active clone (or null if deactivated)
+  return getActiveVoiceClone(userId);
+}
+
+async function getActiveVoiceClone(userId) {
+  if (!userId) return null;
+  const row = await db.get(
+    `SELECT id, voice_id, display_name, language, is_active, created_at
+       FROM voice_clones WHERE user_id = ? AND is_active = 1 LIMIT 1`,
+    [userId]
+  );
+  return row || null;
+}
+
+async function updateVoiceClone(userId, cloneId, updates) {
+  if (!userId || !cloneId) return null;
+  const sets = [];
+  const params = [];
+  if (updates.displayName !== undefined) {
+    sets.push('display_name = ?');
+    params.push(String(updates.displayName).slice(0, 100));
+  }
+  if (updates.language !== undefined) {
+    sets.push('language = ?');
+    params.push(String(updates.language).slice(0, 10));
+  }
+  if (sets.length === 0) return null;
+  params.push(cloneId, userId);
+  await db.run(
+    `UPDATE voice_clones SET ${sets.join(', ')} WHERE id = ? AND user_id = ?`,
+    params
+  );
+  return db.get('SELECT * FROM voice_clones WHERE id = ? AND user_id = ?', [cloneId, userId]);
 }
 
 // PR #8/N — Memory of Actions helpers. Every real tool invocation the
@@ -2159,6 +2274,13 @@ module.exports = {
   getClonedVoice,
   logVoiceCloneEvent,
   listVoiceCloneEvents,
+  // Multi-voice clone library
+  addVoiceClone,
+  listVoiceClones,
+  deleteVoiceCloneById,
+  setActiveVoiceClone,
+  getActiveVoiceClone,
+  updateVoiceClone,
   // PR #8/N — Memory of Actions
   logAction,
   listRecentActions,

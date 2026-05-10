@@ -21,6 +21,13 @@ const {
   setClonedVoiceEnabled,
   logVoiceCloneEvent,
   listVoiceCloneEvents,
+  // Multi-voice clone library
+  addVoiceClone,
+  listVoiceClones,
+  deleteVoiceCloneById,
+  setActiveVoiceClone,
+  getActiveVoiceClone,
+  updateVoiceClone,
 } = require('../db');
 const {
   createClonedVoice,
@@ -425,17 +432,9 @@ router.post('/', async (req, res) => {
     return res.status(err.status || 400).json({ error: err.message });
   }
 
-  // Guard: if the user already has a clone, make them delete the old
-  // one first rather than leaking voice_ids in ElevenLabs.
-  try {
-    const existing = await getClonedVoice(userId);
-    if (existing && existing.voiceId) {
-      return res.status(409).json({
-        error: 'A cloned voice already exists. Delete it first before creating a new one.',
-        existing,
-      });
-    }
-  } catch (_) { /* best effort */ }
+  // Multi-voice: we no longer block creating additional clones.
+  // The legacy users.cloned_voice_id column gets overwritten with
+  // the latest voice, but all clones are preserved in voice_clones table.
 
   let voiceId;
   try {
@@ -464,6 +463,17 @@ router.post('/', async (req, res) => {
 
   try {
     await setClonedVoice(userId, voiceId, CONSENT_VERSION);
+    // Also save to the multi-voice library
+    await addVoiceClone(userId, {
+      voiceId,
+      displayName: String(body.displayName || `Voice Clone ${new Date().toLocaleDateString()}`).slice(0, 100),
+      language: body.language || 'auto',
+      consentVersion: CONSENT_VERSION,
+    });
+    // Set this new clone as active
+    const allClones = await listVoiceClones(userId);
+    const newClone = allClones.find(c => c.voice_id === voiceId);
+    if (newClone) await setActiveVoiceClone(userId, newClone.id);
     await logVoiceCloneEvent({
       userId,
       action: 'created',
@@ -612,31 +622,41 @@ router.post('/tts', async (req, res) => {
 
   // ── Voice selection priority ──
   // 1. Client explicitly sends voiceId (user picked from VoicePicker UI)
-  // 2. Server-side user preference (from POST /select-voice)
-  // 3. Auto-detected native masculine voice (per detected language)
-  // 4. User's cloned voice (if active)
+  // 2. Active clone from multi-voice library (voice_clones table)
+  // 3. Server-side user preference (from POST /select-voice)
+  // 4. Auto-detected native masculine voice (per detected language)
+  // 5. Legacy cloned voice (users.cloned_voice_id)
   let voiceId;
+  let activeLang = null;
 
   if (clientVoiceId && typeof clientVoiceId === 'string') {
     // Priority 1: Client sent a specific voiceId
     voiceId = clientVoiceId.trim();
     console.log(`[voice/tts] Using client-selected voice: ${voiceId}`);
   } else {
-    // Priority 2: Server-side preference
-    const userPref = _userVoicePreference.get(String(userId));
-    if (isNative && userPref?.voiceId) {
-      voiceId = userPref.voiceId;
-      console.log(`[voice/tts] Using server-stored preference: ${userPref.voiceName || voiceId}`);
-    } else if (isNative || !cloneInfo?.voiceId) {
-      // Priority 3: Auto-discover native masculine voice
-      const detectedLang = (lang || 'en').toLowerCase().split('-')[0];
-      voiceId = await discoverNativeMaleVoice(apiKey, detectedLang);
-      if (voiceId) {
-        console.log(`[voice/tts] Using auto-discovered voice for lang="${detectedLang}": ${voiceId}`);
-      }
+    // Priority 2: Active clone from multi-voice library
+    const activeClone = await getActiveVoiceClone(userId);
+    if (!isNative && activeClone?.voice_id) {
+      voiceId = activeClone.voice_id;
+      activeLang = activeClone.language !== 'auto' ? activeClone.language : null;
+      console.log(`[voice/tts] Using active clone: ${activeClone.display_name} (${voiceId}, lang=${activeLang || 'auto'})`);
     } else {
-      // Priority 4: Cloned voice
-      voiceId = cloneInfo.voiceId;
+      // Priority 3: Server-side preference
+      const userPref = _userVoicePreference.get(String(userId));
+      if (isNative && userPref?.voiceId) {
+        voiceId = userPref.voiceId;
+        console.log(`[voice/tts] Using server-stored preference: ${userPref.voiceName || voiceId}`);
+      } else if (isNative || !cloneInfo?.voiceId) {
+        // Priority 4: Auto-discover native masculine voice
+        const detectedLang = (lang || 'en').toLowerCase().split('-')[0];
+        voiceId = await discoverNativeMaleVoice(apiKey, detectedLang);
+        if (voiceId) {
+          console.log(`[voice/tts] Using auto-discovered voice for lang="${detectedLang}": ${voiceId}`);
+        }
+      } else {
+        // Priority 5: Legacy cloned voice
+        voiceId = cloneInfo.voiceId;
+      }
     }
   }
 
@@ -773,6 +793,13 @@ router.post('/admin-set', async (req, res) => {
   }
   try {
     const result = await setClonedVoice(userId, voiceId.trim(), CONSENT_VERSION);
+    // Also register in multi-voice library
+    await addVoiceClone(userId, {
+      voiceId: voiceId.trim(),
+      displayName: req.body.displayName || 'Restored Voice',
+      language: req.body.language || 'auto',
+      consentVersion: CONSENT_VERSION,
+    });
     await logVoiceCloneEvent({
       userId, action: 'admin-set', voiceId: voiceId.trim(),
       consentVersion: CONSENT_VERSION,
@@ -783,6 +810,105 @@ router.post('/admin-set', async (req, res) => {
   } catch (err) {
     console.error('[voice/clone admin-set] failed', err?.message);
     return res.status(500).json({ error: 'Failed to set voice.' });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════
+// Multi-voice clone library endpoints
+// ═══════════════════════════════════════════════════════════════════
+
+// GET /api/voice/clone/library — list all cloned voices for this user
+router.get('/library', async (req, res) => {
+  const userId = uidOf(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+  try {
+    const clones = await listVoiceClones(userId);
+    res.json({ ok: true, clones });
+  } catch (err) {
+    console.error('[voice/library GET]', err?.message);
+    res.status(500).json({ error: 'Failed to list voice clones.' });
+  }
+});
+
+// POST /api/voice/clone/library — add an existing ElevenLabs voiceId
+// Body: { voiceId, displayName, language? }
+router.post('/library', async (req, res) => {
+  const userId = uidOf(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+  const { voiceId, displayName, language } = req.body || {};
+  if (!voiceId || typeof voiceId !== 'string') {
+    return res.status(400).json({ error: 'voiceId is required.' });
+  }
+  try {
+    const clone = await addVoiceClone(userId, {
+      voiceId: voiceId.trim(),
+      displayName: displayName || 'Custom Voice',
+      language: language || 'auto',
+      consentVersion: CONSENT_VERSION,
+    });
+    res.json({ ok: true, clone });
+  } catch (err) {
+    console.error('[voice/library POST]', err?.message);
+    res.status(500).json({ error: 'Failed to add voice clone.' });
+  }
+});
+
+// POST /api/voice/clone/library/:id/activate — set as active clone
+router.post('/library/:id/activate', async (req, res) => {
+  const userId = uidOf(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+  try {
+    const active = await setActiveVoiceClone(userId, Number(req.params.id));
+    if (!active) return res.status(404).json({ error: 'Clone not found.' });
+    // Also update legacy cloned_voice fields for backward compatibility
+    await setClonedVoice(userId, active.voice_id, CONSENT_VERSION);
+    res.json({ ok: true, active });
+  } catch (err) {
+    console.error('[voice/library activate]', err?.message);
+    res.status(500).json({ error: 'Failed to activate voice clone.' });
+  }
+});
+
+// POST /api/voice/clone/library/deactivate — switch back to native voice
+router.post('/library/deactivate', async (req, res) => {
+  const userId = uidOf(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+  try {
+    await setActiveVoiceClone(userId, null);
+    res.json({ ok: true, active: null });
+  } catch (err) {
+    console.error('[voice/library deactivate]', err?.message);
+    res.status(500).json({ error: 'Failed to deactivate.' });
+  }
+});
+
+// PATCH /api/voice/clone/library/:id — update display name or language
+router.patch('/library/:id', async (req, res) => {
+  const userId = uidOf(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+  const { displayName, language } = req.body || {};
+  try {
+    const updated = await updateVoiceClone(userId, Number(req.params.id), { displayName, language });
+    if (!updated) return res.status(404).json({ error: 'Clone not found or nothing to update.' });
+    res.json({ ok: true, clone: updated });
+  } catch (err) {
+    console.error('[voice/library PATCH]', err?.message);
+    res.status(500).json({ error: 'Failed to update voice clone.' });
+  }
+});
+
+// DELETE /api/voice/clone/library/:id — remove a clone from the library
+// Does NOT delete from ElevenLabs — just removes from the local DB.
+router.delete('/library/:id', async (req, res) => {
+  const userId = uidOf(req);
+  if (!userId) return res.status(401).json({ error: 'Not authenticated.' });
+  try {
+    const deleted = await deleteVoiceCloneById(userId, Number(req.params.id));
+    if (!deleted) return res.status(404).json({ error: 'Clone not found.' });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[voice/library DELETE]', err?.message);
+    res.status(500).json({ error: 'Failed to delete voice clone.' });
   }
 });
 
