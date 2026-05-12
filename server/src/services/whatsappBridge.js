@@ -187,7 +187,6 @@ class WhatsAppBridge extends EventEmitter {
     let body = (msg.body || '').trim();
 
     // ── Prevent Infinite Loops ──
-    // ── Prevent Infinite Loops ──
     if (body.startsWith('⚠️') || body.startsWith('✅') || body.startsWith('⛔') || body.startsWith('🤖')) return;
 
     // ── AUDIO TRANSCRIBER (STT) ──
