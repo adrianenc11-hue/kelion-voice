@@ -196,7 +196,56 @@ class WhatsAppBridge extends EventEmitter {
     // ── Command: Toggle Translator Mode ──
     const bodyLower = body.toLowerCase();
     
-    const translateMatch = bodyLower.match(/^!(?:traduci|translate)\s+on(?:\s+([a-z]+)\s+([a-z]+))?/);
+    // Interactive setup
+    if (bodyLower === '!traduci' || bodyLower === '!translate') {
+      this._activeTranslators.set(chatId, { setupMode: true });
+      await msg.reply('În ce limbă dorești traducerea? Scrie limbile sub forma: limba_mea limba_lui (ex: ro jp)');
+      return;
+    }
+
+    const translateContext = this._activeTranslators.get(chatId);
+
+    // Setup mode response processing
+    if (translateContext && translateContext.setupMode) {
+      if (msg.fromMe) {
+        const langs = bodyLower.split(/\s+/).filter(Boolean);
+        if (langs.length >= 2) {
+          const adminLang = langs[0];
+          const otherLang = langs[1];
+          this._activeTranslators.set(chatId, { adminLang, otherLang });
+          await msg.reply(`✅ Translator automat activat.\n- Limba ta: ${adminLang}\n- Limba interlocutorului: ${otherLang}`);
+          
+          // Auto-greeting to the interlocutor via AI
+          if (this._chatHandler) {
+            try {
+              const greetingRo = `Salut! Pentru această conversație se folosește un translator AI. Limba mea este ${adminLang}, iar a ta este ${otherLang}. Orice scrii va fi tradus automat.`;
+              const translatedGreeting = await this._chatHandler(
+                greetingRo, 'Admin', chatName, isGroup, 
+                { isTranslateMode: true, isFromAdmin: true, isExplicitTranslate: false, translateContext: { adminLang, otherLang } }
+              );
+              if (translatedGreeting) {
+                await chat.sendMessage(translatedGreeting);
+              }
+            } catch (err) {
+              console.error('[WhatsApp] Auto-greeting failed:', err);
+            }
+          }
+          return;
+        } else if (bodyLower === '!cancel') {
+          this._activeTranslators.delete(chatId);
+          await msg.reply('❌ Configurare anulată.');
+          return;
+        } else {
+          await msg.reply('Te rog să specifici ambele limbi (ex: ro jp), sau scrie !cancel pentru a anula.');
+          return;
+        }
+      } else {
+        return; // Ignore other person's messages while waiting for Admin to finish setup
+      }
+    }
+    
+    // Direct command (fast way)
+    const translateMatch = bodyLower.match(/^!(?:traduci|translate)\s+on(?:\s+([a-zA-Z]+)\s+([a-zA-Z]+))?/);
     if (translateMatch) {
       const adminLang = translateMatch[1] || 'auto';
       const otherLang = translateMatch[2] || 'auto';
@@ -218,8 +267,7 @@ class WhatsAppBridge extends EventEmitter {
       return;
     }
 
-    const translateContext = this._activeTranslators.get(chatId);
-    const isTranslateMode = !!translateContext;
+    const isTranslateMode = !!translateContext && !translateContext.setupMode;
     const isExplicitTranslate = bodyLower.startsWith('traduci:') || bodyLower.startsWith('translate:');
 
     // Ignore our own messages UNLESS translate mode is on, or we used an explicit trigger
