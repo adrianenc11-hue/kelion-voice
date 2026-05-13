@@ -15,6 +15,7 @@ const NAV_ITEMS = [
   { to: '/admin/visitors', icon: '📈', label: 'Analitics' },
   { to: '/admin/payouts',  icon: '💸', label: 'Payouts' },
   { to: '/admin/settings', icon: '⚙️', label: 'Setări' },
+  { to: '/admin/agent',    icon: '🤖', label: 'Agent Mode' },
 ]
 
 const PAGE_TITLES = {
@@ -25,6 +26,7 @@ const PAGE_TITLES = {
   '/admin/visitors': 'Analitics',
   '/admin/payouts':  'Payouts',
   '/admin/settings': 'Setări',
+  '/admin/agent':    'Agent Mode',
 }
 
 export default function AdminLayout() {
@@ -33,6 +35,10 @@ export default function AdminLayout() {
   const [user, setUser] = useState(null)
   const [loading, setLoading] = useState(true)
   const [authError, setAuthError] = useState(null)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
+  const toggleSidebar = useCallback(() => setSidebarOpen(v => !v), [])
+  const closeSidebar = useCallback(() => setSidebarOpen(false), [])
 
   // Auth check — redirect to / if not admin
   useEffect(() => {
@@ -84,8 +90,15 @@ export default function AdminLayout() {
   return (
     <ToastProvider>
       <div className="admin-root">
+        {/* Overlay backdrop (mobile) */}
+        <div
+          className={`admin-overlay ${sidebarOpen ? 'open' : ''}`}
+          onClick={closeSidebar}
+          aria-hidden="true"
+        />
+
         {/* Sidebar */}
-        <aside className="admin-sidebar">
+        <aside className={`admin-sidebar ${sidebarOpen ? 'open' : ''}`}>
           <div className="admin-sidebar-logo">
             <span style={{ fontSize: 20 }}>⚡</span>
             <span>KELION ADMIN</span>
@@ -97,6 +110,7 @@ export default function AdminLayout() {
                 to={item.to}
                 end={item.end}
                 className={({ isActive }) => `admin-nav-item ${isActive ? 'active' : ''}`}
+                onClick={closeSidebar}
               >
                 <span className="nav-icon">{item.icon}</span>
                 <span className="nav-label">{item.label}</span>
@@ -106,7 +120,7 @@ export default function AdminLayout() {
           <div className="admin-sidebar-back">
             <button
               className="admin-nav-item"
-              onClick={() => navigate('/')}
+              onClick={() => { closeSidebar(); navigate('/'); }}
               style={{ color: 'var(--admin-text-muted)' }}
             >
               <span className="nav-icon">←</span>
@@ -118,7 +132,15 @@ export default function AdminLayout() {
         {/* Main */}
         <main className="admin-main">
           <header className="admin-header">
-            <div className="admin-header-title">
+            <div className="admin-header-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <button
+                className="hamburger-btn"
+                onClick={toggleSidebar}
+                aria-label="Toggle sidebar"
+                type="button"
+              >
+                ☰
+              </button>
               <span>{pageTitle}</span>
             </div>
             <div className="admin-header-actions">
