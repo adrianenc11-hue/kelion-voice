@@ -29,16 +29,13 @@ const MODELS = {
   vision_heavy: process.env.MODEL_VISION_HEAVY || 'gemini-1.5-pro',
 };
 
-// OpenRouter fallback models (May 2026 updated list)
-// We prioritize native Google AI Studio models in the fallback chain 
-// so if OpenRouter fails, it switches to direct Google API.
 const OPENROUTER_FALLBACK = {
-  chat:   ['gemini-1.5-flash', 'openai/gpt-5.5-mini', 'anthropic/claude-4.7-sonnet'],
-  chat_heavy: ['gemini-1.5-pro', 'openai/gpt-5.5', 'anthropic/claude-4.7-opus'],
-  coder:  ['gemini-1.5-flash', 'qwen/qwen-3-coder-max', 'openai/gpt-5.5-mini'],
-  coder_heavy: ['gemini-1.5-pro', 'anthropic/claude-4.7-opus', 'openai/gpt-5.5'],
-  vision: ['gemini-1.5-flash', 'openai/gpt-5.5-mini'],
-  vision_heavy: ['gemini-1.5-pro', 'openai/gpt-5.5'],
+  chat:   ['google/gemini-1.5-flash', 'openai/gpt-5.5-mini', 'anthropic/claude-4.7-sonnet'],
+  chat_heavy: ['google/gemini-1.5-pro', 'openai/gpt-5.5', 'anthropic/claude-4.7-opus'],
+  coder:  ['google/gemini-1.5-flash', 'qwen/qwen-3-coder-max', 'openai/gpt-5.5-mini'],
+  coder_heavy: ['google/gemini-1.5-pro', 'anthropic/claude-4.7-opus', 'openai/gpt-5.5'],
+  vision: ['google/gemini-1.5-flash', 'openai/gpt-5.5-mini'],
+  vision_heavy: ['google/gemini-1.5-pro', 'openai/gpt-5.5'],
 };
 
 /**
@@ -58,25 +55,32 @@ function getModel(taskType, useHeavy = false) {
  * Otherwise, use OpenRouter.
  *
  * @param {string} model - Model ID
- * @returns {{ url: string, authHeader: string, provider: string }}
+ * @returns {{ url: string, authHeader: string, provider: string, apiModel: string }}
  */
 function getEndpoint(model) {
   const googleKey = process.env.GOOGLE_API_KEY;
-  const isGeminiModel = model.startsWith('gemini-3') || model.startsWith('gemini-1.5');
+  const isGeminiModel = model.includes('gemini-');
 
   if (googleKey && isGeminiModel) {
+    // Google AI Studio natively expects 'gemini-X', strip 'google/' if present
+    const bareModel = model.replace(/^google\//, '');
     return {
       url: GOOGLE_AI_STUDIO,
       authHeader: `Bearer ${googleKey}`,
       provider: 'google-ai-studio',
+      apiModel: bareModel
     };
   }
 
   // Fall back to OpenRouter
+  // OpenRouter requires the 'google/' prefix for Gemini models
+  const openRouterModel = (!model.includes('/') && isGeminiModel) ? `google/${model}` : model;
+  
   return {
     url: 'https://openrouter.ai/api/v1/chat/completions',
     authHeader: `Bearer ${process.env.OPENROUTER_API_KEY}`,
     provider: 'openrouter',
+    apiModel: openRouterModel
   };
 }
 
@@ -127,7 +131,7 @@ async function smartFetch(taskType, body, useHeavy = false) {
         'HTTP-Referer': 'https://kelion.ai',
         'X-Title': 'Kelion AI',
       },
-      body: JSON.stringify({ ...body, model }),
+      body: JSON.stringify({ ...body, model: endpoint.apiModel }),
       signal: ctrl.signal,
     });
     clearTimeout(timer);

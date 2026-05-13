@@ -1911,12 +1911,12 @@ export default function KelionStage() {
           <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 12, zIndex: 10, pointerEvents: 'none' }}>
             <div style={{
               display: 'flex', alignItems: 'center', gap: '10px', opacity: 0.95,
-              background: 'rgba(0,0,0,0.6)', padding: '6px 14px', borderRadius: '12px',
-              backdropFilter: 'blur(8px)', border: '1px solid rgba(255, 215, 0, 0.3)',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
+              background: '#ffffff', padding: '6px 14px', borderRadius: '12px',
+              backdropFilter: 'blur(8px)', border: '1px solid rgba(0, 0, 0, 0.1)',
+              boxShadow: '0 4px 12px rgba(0,0,0,0.2)'
             }}>
-              <img src="/ae_studio_logo_gold.png" alt="AE Studio Gold" style={{ height: '26px', filter: 'drop-shadow(0 0 8px rgba(255, 215, 0, 0.4))' }} />
-              <span style={{ color: '#ffd700', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase' }}>AE Studio</span>
+              <img src="/ae_studio_logo_gold.png" alt="AE Studio Gold" style={{ height: '26px' }} />
+              <span style={{ color: '#000000', fontFamily: 'system-ui, sans-serif', fontSize: '12px', fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase' }}>AE Studio</span>
             </div>
           </div>
           {/* Chat Input Container */}
