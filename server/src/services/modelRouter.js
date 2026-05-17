@@ -86,17 +86,17 @@ const MODELS = {
   // Every default model is Gemini so getEndpoint() routes to AI Studio.
   // Override via env if you ever want to switch back.
   chat: process.env.MODEL_CHAT || 'gemini-2.5-flash',
-  chat_heavy: process.env.MODEL_CHAT_HEAVY || 'gemini-2.5-pro',
-  chat_heavy_fast: process.env.MODEL_CHAT_HEAVY_FAST || process.env.MODEL_CHAT_HEAVY || 'gemini-2.5-pro',
+  chat_heavy: process.env.MODEL_CHAT_HEAVY || 'anthropic/claude-3-opus-20240229',
+  chat_heavy_fast: process.env.MODEL_CHAT_HEAVY_FAST || 'anthropic/claude-3-opus-20240229',
 
   // Coding: Flash is fast and cheap, Pro is for heavy audits.
   coder: process.env.MODEL_CODER || 'gemini-2.5-flash',
-  coder_heavy: process.env.MODEL_CODER_HEAVY || 'gemini-2.5-pro',
-  coder_heavy_fast: process.env.MODEL_CODER_HEAVY_FAST || process.env.MODEL_CODER_HEAVY || 'gemini-2.5-pro',
+  coder_heavy: process.env.MODEL_CODER_HEAVY || 'anthropic/claude-3-opus-20240229',
+  coder_heavy_fast: process.env.MODEL_CODER_HEAVY_FAST || 'anthropic/claude-3-opus-20240229',
 
   // Vision: Gemini 2.5 Flash has strong multimodal support.
   vision: process.env.MODEL_VISION || 'gemini-2.5-flash',
-  vision_heavy: process.env.MODEL_VISION_HEAVY || 'gemini-2.5-pro',
+  vision_heavy: process.env.MODEL_VISION_HEAVY || 'anthropic/claude-3-opus-20240229',
 
   // Tandem second-brain (Kimi K2.6) — runs in parallel with Opus 4.7 on heavy tasks.
   tandem_chat: process.env.MODEL_CHAT_TANDEM || 'moonshotai/kimi-k2.6',
