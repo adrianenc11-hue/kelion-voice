@@ -66,6 +66,8 @@ function _queuedModelCall(fn) {
 
 // Google/Gemini chat provider intentionally disabled.
 const GOOGLE_KEYS = [];
+const OPENROUTER_PRIMARY_TIMEOUT_MS = Number(process.env.OPENROUTER_PRIMARY_TIMEOUT_MS) || 20_000;
+const OPENROUTER_FALLBACK_TIMEOUT_MS = Number(process.env.OPENROUTER_FALLBACK_TIMEOUT_MS) || 8_000;
 
 function hasOpenRouterProvider() {
   return !!process.env.OPENROUTER_API_KEY;
@@ -206,7 +208,7 @@ async function smartFetch(taskType, body, useHeavy = false, fastMode = false) {
   // Try primary provider — 45s timeout (heavy tasks like audits need time)
   const makePrimaryCall = async () => {
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 45000);
+    const timer = setTimeout(() => ctrl.abort(), OPENROUTER_PRIMARY_TIMEOUT_MS);
     try {
       const response = await fetch(endpoint.url, {
         method: 'POST',
@@ -252,7 +254,7 @@ async function smartFetch(taskType, body, useHeavy = false, fastMode = false) {
     console.log(`[modelRouter] fallback ${i + 1}/${chain.length}: ${fbModel}`);
 
     const fCtrl = new AbortController();
-    const fTimer = setTimeout(() => fCtrl.abort(), 12000);
+    const fTimer = setTimeout(() => fCtrl.abort(), OPENROUTER_FALLBACK_TIMEOUT_MS);
     try {
       const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
         method: 'POST',
@@ -299,7 +301,7 @@ async function runTandem(taskType, body) {
   const secondaryPromise = (async () => {
     const endpoint = getEndpoint(secondaryModel);
     const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 45000);
+    const timer = setTimeout(() => ctrl.abort(), OPENROUTER_PRIMARY_TIMEOUT_MS);
     try {
       const response = await fetch(endpoint.url, {
         method: 'POST',

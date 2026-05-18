@@ -1853,9 +1853,14 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
               } catch {
                 err = {};
               }
+              const edgeHtmlError = /^\s*<!doctype html/i.test(rawError) || /^\s*<html/i.test(rawError);
               const serverError = err.code === 'AI_PROVIDER_NOT_CONFIGURED'
                 ? 'Nu exista provider AI configurat pe server. Seteaza OPENROUTER_API_KEY in Railway pentru kelionai.app.'
-                : (err.error || (rawError ? `Server ${r.status}: ${rawError.slice(0, 180)}` : `Server ${r.status}`));
+                : err.code === 'CHAT_AI_TIMEOUT'
+                  ? 'AI request timeout pe server. Incearca din nou dupa redeploy.'
+                  : edgeHtmlError
+                    ? `Server ${r.status}: edge/proxy a returnat HTML in loc de JSON. Verifica Railway deployment si logurile /api/chat.`
+                    : (err.error || (rawError ? `Server ${r.status}: ${rawError.slice(0, 180)}` : `Server ${r.status}`));
               _setTaskStatus({ tool: 'work', progress: 100, label: 'Server error', phase: 'error' });
               finalReply = serverError;
               break;
