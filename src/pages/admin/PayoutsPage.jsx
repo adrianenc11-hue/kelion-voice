@@ -57,7 +57,8 @@ export default function PayoutsPage() {
   const dest = data?.destination
   const recent = Array.isArray(data?.recentPayouts) ? data.recentPayouts : []
   const split = data?.split || {}
-  const canInstant = data?.instantEligible && bal.instantAvailable?.amount > 0
+  const reserve = split?.reserve || null
+  const canInstant = data?.instantEligible && bal.instantAvailable?.amount > 0 && reserve?.ok !== false
 
   if (loading) return <div><Skeleton height={400} /></div>
 
@@ -114,8 +115,19 @@ export default function PayoutsPage() {
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between' }}>
             <span style={{ color: 'var(--admin-text-dim)' }}>Profit net</span>
-            <span style={{ fontWeight: 700, color: 'var(--admin-green)' }}>{split.allocation?.ownerDisplay || '—'}</span>
+            <span style={{ fontWeight: 700, color: reserve?.ok === false ? 'var(--admin-red)' : 'var(--admin-green)' }}>{reserve?.protectedOwnerDisplay || split.allocation?.ownerDisplay || '—'}</span>
           </div>
+          {reserve && (
+            <div style={{
+              marginTop: 8,
+              paddingTop: 8,
+              borderTop: '1px solid rgba(255,255,255,0.06)',
+              color: reserve.ok ? 'var(--admin-green)' : 'var(--admin-red)',
+              fontWeight: 600,
+            }}>
+              {reserve.message}
+            </div>
+          )}
         </div>
       </div>
 
@@ -126,7 +138,7 @@ export default function PayoutsPage() {
         disabled={!canInstant || busy}
         onClick={() => setInstantModal(true)}
       >
-        {canInstant ? '⚡ Instant payout pe card (~30 min, taxa ~1% + 0.25 EUR)' : '⚡ Instant payout indisponibil'}
+        {canInstant ? 'Instant payout pe card (~30 min, taxa ~1% + 0.25 EUR)' : (reserve?.ok === false ? 'Payout blocat - tampon AI neacoperit' : 'Instant payout indisponibil')}
       </button>
 
       {/* Recent payouts */}
@@ -154,7 +166,7 @@ export default function PayoutsPage() {
       <ConfirmModal
         open={instantModal}
         title="Instant Payout"
-        message="Transferi soldul disponibil pe cardul legat acum. Taxa Stripe ~1% + 0.25 EUR. Acțiunea nu poate fi anulată."
+        message="Transferi doar profitul disponibil dupa acoperirea tamponului AI. Taxa Stripe ~1% + 0.25 EUR. Actiunea nu poate fi anulata."
         confirmLabel="Transferă acum"
         danger
         busy={busy}

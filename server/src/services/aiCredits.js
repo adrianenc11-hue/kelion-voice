@@ -351,6 +351,12 @@ async function getAllCredits() {
 const DEFAULT_AI_ALLOCATION_FRACTION = Number(
   process.env.AI_ALLOCATION_FRACTION || 0.5,
 );
+const DEFAULT_OPENROUTER_BUFFER_USD = Number(
+  process.env.AI_MIN_OPENROUTER_BUFFER_USD || 10,
+);
+const DEFAULT_AI_RESERVE_FX = Number(
+  process.env.AI_RESERVE_FX_USD_TO_REVENUE || 1,
+);
 
 function formatMinorCurrency(cents, currency = 'gbp') {
   if (typeof cents !== 'number' || !Number.isFinite(cents)) return '—';
@@ -424,18 +430,46 @@ async function buildRevenueSplit(revenueSummary, { days = 30, currency = 'gbp' }
   const allocatedCents = Math.round(revenueCents * fraction);
   const ownerCents = revenueCents - allocatedCents;
 
-  const elevenlabs = await probeElevenLabsSpend();
+  const [elevenlabs, openrouterCard] = await Promise.all([
+    probeElevenLabsSpend(),
+    probeOpenRouter(),
+  ]);
 
   // ElevenLabs tier is priced in USD. We don't do FX conversion here —
   // the admin dashboard shows both values side-by-side with their
   // currencies explicit so the admin can eyeball the buffer.
   const knownSpendCents = Number(elevenlabs.estSpendCents || 0);
 
-  // Claude/OpenRouter spend is tracked by OpenRouter; keep the allocation
-  // note pointed at the real provider, not Google AI Studio.
+  const minOpenRouterBufferUsd = Number.isFinite(DEFAULT_OPENROUTER_BUFFER_USD) && DEFAULT_OPENROUTER_BUFFER_USD > 0
+    ? DEFAULT_OPENROUTER_BUFFER_USD
+    : 10;
+  const reserveFx = Number.isFinite(DEFAULT_AI_RESERVE_FX) && DEFAULT_AI_RESERVE_FX > 0
+    ? DEFAULT_AI_RESERVE_FX
+    : 1;
+  const openrouterAvailableUsd = typeof openrouterCard.balance === 'number' && Number.isFinite(openrouterCard.balance)
+    ? openrouterCard.balance
+    : null;
+  const openrouterDeficitUsd = openrouterAvailableUsd == null
+    ? minOpenRouterBufferUsd
+    : Math.max(0, minOpenRouterBufferUsd - openrouterAvailableUsd);
+  const reserveDeficitCents = Math.ceil(openrouterDeficitUsd * reserveFx * 100);
+  const protectedOwnerCents = Math.max(0, ownerCents - reserveDeficitCents);
+
+  // Claude/OpenRouter spend is tracked by OpenRouter. This reserve is the
+  // hard business rule: do not treat owner money as withdrawable profit until
+  // OpenRouter is at or above the configured minimum buffer.
   const openrouter = {
-    source: 'manual',
-    note: 'Claude Opus spend runs through OpenRouter. Use OpenRouter credits/usage to cross-check.',
+    source: openrouterAvailableUsd == null ? 'unverified' : 'openrouter',
+    status: openrouterCard.status,
+    availableUsd: openrouterAvailableUsd,
+    availableDisplay: openrouterAvailableUsd == null ? 'unverified' : `$${openrouterAvailableUsd.toFixed(2)}`,
+    minBufferUsd: minOpenRouterBufferUsd,
+    deficitUsd: openrouterDeficitUsd,
+    deficitDisplay: `$${openrouterDeficitUsd.toFixed(2)}`,
+    topUpUrl: openrouterCard.topUpUrl,
+    note: openrouterAvailableUsd == null
+      ? 'OpenRouter balance could not be verified. Treat the full buffer as reserved.'
+      : 'Claude spend runs through OpenRouter. Keep this buffer filled before owner payout.',
     billingUrl: 'https://openrouter.ai/settings/credits',
   };
 
@@ -467,6 +501,8 @@ async function buildRevenueSplit(revenueSummary, { days = 30, currency = 'gbp' }
       display: formatMinorCurrency(allocatedCents, currency),
       ownerCents,
       ownerDisplay: formatMinorCurrency(ownerCents, currency),
+      protectedOwnerCents,
+      protectedOwnerDisplay: formatMinorCurrency(protectedOwnerCents, currency),
     },
     spend: {
       openrouter,
@@ -483,6 +519,20 @@ async function buildRevenueSplit(revenueSummary, { days = 30, currency = 'gbp' }
       },
       knownTotalCents: knownSpendCents,
       knownTotalDisplay: formatMinorCurrency(knownSpendCents, 'usd'),
+    },
+    reserve: {
+      ok: openrouterDeficitUsd <= 0,
+      status: openrouterDeficitUsd > 0 ? 'blocked' : 'ok',
+      minOpenRouterBufferUsd,
+      openrouterAvailableUsd,
+      openrouterDeficitUsd,
+      reserveDeficitCents,
+      reserveDeficitDisplay: formatMinorCurrency(reserveDeficitCents, currency),
+      protectedOwnerCents,
+      protectedOwnerDisplay: formatMinorCurrency(protectedOwnerCents, currency),
+      message: openrouterDeficitUsd > 0
+        ? `OpenRouter buffer is short by $${openrouterDeficitUsd.toFixed(2)}. Refill AI reserve before payout.`
+        : `OpenRouter buffer is covered at $${minOpenRouterBufferUsd.toFixed(2)} minimum.`,
     },
     delta: {
       // Positive = budget remaining (allocation > known spend).
