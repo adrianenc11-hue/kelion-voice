@@ -134,6 +134,7 @@ router.post('/', async (req, res) => {
     // This ensures identity consistency and follows the "Extra Credits" rule.
     const { buildKelionPersona, resolveLockedLangTag } = require('./realtime');
     const { listMemoryItems, getCreditsBalance, addCreditsTransaction } = require('../db');
+    const brainBus = require('../services/brainBus');
     
     let memoryItems = [];
     let creditsBalance = null;
@@ -146,6 +147,28 @@ router.post('/', async (req, res) => {
       } catch (err) { console.warn('[chat] memory/credits fetch failed:', err && err.message); }
     }
     step(`db mem=${memoryItems.length} bal=${creditsBalance}`);
+    let brainContext = '';
+    try {
+      brainContext = await brainBus.recentBrainContext({ userId: adminUser?.id, sessionId: sid, limit: 10 });
+      if (message) {
+        await brainBus.emit({
+          userId: adminUser?.id,
+          sessionId: sid,
+          source: 'chat',
+          kind: 'user_message',
+          summary: message,
+          payload: { hasImage: !!image, toolResponses: false },
+        });
+      } else if (toolResponses) {
+        await brainBus.emit({
+          userId: adminUser?.id,
+          sessionId: sid,
+          source: 'chat',
+          kind: 'tool_responses',
+          summary: `${Array.isArray(toolResponses) ? toolResponses.length : 0} tool response(s) returned to the brain`,
+        });
+      }
+    } catch (_) {}
 
     // ── Task Detection: Basic Chat vs Complex Coding ──────────────────
     // Two independent signals trigger the premium model:
@@ -229,7 +252,8 @@ router.post('/', async (req, res) => {
       geo: ipGeoData,
       lockedLangTag: await resolveLockedLangTag({ req, user: adminUser, forcedLang }),
       clientTz: clientTimezone,
-      clientLocalTime: clientLocalTime
+      clientLocalTime: clientLocalTime,
+      brainContext,
     });
 
     // Convert history to OpenAI format
@@ -376,6 +400,16 @@ router.post('/', async (req, res) => {
 
       if (choice?.message?.tool_calls) {
         console.log(`[chat] Returning ${choice.message.tool_calls.length} tools to client for execution...`);
+        try {
+          await brainBus.emit({
+            userId: adminUser?.id,
+            sessionId: sid,
+            source: 'chat',
+            kind: 'tool_calls',
+            summary: `Brain requested ${choice.message.tool_calls.length} tool call(s)`,
+            payload: { names: choice.message.tool_calls.map(tc => tc.function?.name || 'unknown') },
+          });
+        } catch (_) {}
         
         // Save the assistant's tool calls to session history so the next request is valid.
         const parts = [];
@@ -412,6 +446,16 @@ router.post('/', async (req, res) => {
       const reply = choice?.message?.content || '';
       if (reply) {
         session.history.push({ role: 'assistant', parts: [{ text: reply }] });
+        try {
+          await brainBus.emit({
+            userId: adminUser?.id,
+            sessionId: sid,
+            source: 'chat',
+            kind: 'assistant_reply',
+            summary: reply,
+            payload: { model: activeModel, heavy: isHeavy },
+          });
+        } catch (_) {}
       }
       // Surface upstream provider error so we don't return a silent empty reply.
       if (!reply && result && result.error) {

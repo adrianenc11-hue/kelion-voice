@@ -453,6 +453,26 @@ async function initDb() {
       FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
   `);
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS brain_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER,
+      session_id TEXT,
+      source TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      payload TEXT,
+      task_id INTEGER,
+      ok INTEGER NOT NULL DEFAULT 1,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE SET NULL,
+      FOREIGN KEY (task_id) REFERENCES agent_tasks(id) ON DELETE SET NULL
+    )
+  `);
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_brain_events_user ON brain_events(user_id, created_at DESC)');
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_brain_events_session ON brain_events(session_id, created_at DESC)');
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_brain_events_task ON brain_events(task_id, created_at DESC)');
+
   await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_studio_workspaces_user_name ON studio_workspaces(user_id, name)');
   await db.exec('CREATE INDEX IF NOT EXISTS idx_studio_workspaces_user ON studio_workspaces(user_id, updated_at DESC)');
 
@@ -1036,6 +1056,91 @@ async function listRecentActions(userId, { limit = 40, sessionId = null } = {}) 
 // Older `locale` rows for the same user are pruned first so the persona
 // never receives contradictory "Preferred language: English" +
 // "Preferred language: Romanian" lines after the user changes it.
+function _safeBrainEventPayload(payload) {
+  if (payload == null) return null;
+  try {
+    const seen = new WeakSet();
+    const json = JSON.stringify(payload, (key, value) => {
+      if (/password|token|key|secret|auth|cookie|bearer|otp|pin/i.test(key)) return '[redacted]';
+      if (typeof value === 'string') return value.length > 1000 ? value.slice(0, 997) + '...' : value;
+      if (value && typeof value === 'object') {
+        if (seen.has(value)) return '[circular]';
+        seen.add(value);
+      }
+      return value;
+    });
+    return json ? json.slice(0, 20_000) : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function logBrainEvent({
+  userId = null,
+  sessionId = null,
+  source,
+  kind,
+  summary,
+  payload = null,
+  taskId = null,
+  ok = true,
+} = {}) {
+  if (!source || !kind || !summary) return null;
+  try {
+    const r = await db.run(
+      `INSERT INTO brain_events
+         (user_id, session_id, source, kind, summary, payload, task_id, ok)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        userId || null,
+        sessionId ? String(sessionId).slice(0, 100) : null,
+        String(source).slice(0, 80),
+        String(kind).slice(0, 80),
+        String(summary).replace(/\s+/g, ' ').trim().slice(0, 700),
+        _safeBrainEventPayload(payload),
+        taskId || null,
+        ok ? 1 : 0,
+      ]
+    );
+    return { id: r.lastID };
+  } catch (err) {
+    if (process.env.NODE_ENV !== 'test') {
+      console.error('[brain_events] logBrainEvent failed:', err?.message);
+    }
+    return null;
+  }
+}
+
+async function listRecentBrainEvents({ userId = null, sessionId = null, taskId = null, limit = 40 } = {}) {
+  const cappedLimit = Math.max(1, Math.min(200, Number(limit) || 40));
+  if (taskId) {
+    return db.all(
+      `SELECT id, user_id, session_id, source, kind, summary, task_id, ok, created_at
+         FROM brain_events WHERE task_id = ? ORDER BY id DESC LIMIT ?`,
+      [taskId, cappedLimit]
+    );
+  }
+  if (sessionId) {
+    return db.all(
+      `SELECT id, user_id, session_id, source, kind, summary, task_id, ok, created_at
+         FROM brain_events WHERE session_id = ? ORDER BY id DESC LIMIT ?`,
+      [String(sessionId).slice(0, 100), cappedLimit]
+    );
+  }
+  if (userId) {
+    return db.all(
+      `SELECT id, user_id, session_id, source, kind, summary, task_id, ok, created_at
+         FROM brain_events WHERE user_id = ? ORDER BY id DESC LIMIT ?`,
+      [userId, cappedLimit]
+    );
+  }
+  return db.all(
+    `SELECT id, user_id, session_id, source, kind, summary, task_id, ok, created_at
+       FROM brain_events ORDER BY id DESC LIMIT ?`,
+    [cappedLimit]
+  );
+}
+
 async function setPreferredLanguage(userId, shortTag, factText) {
   if (!userId || !shortTag) return null;
   const userExists = await getUserById(userId);
@@ -2473,6 +2578,8 @@ module.exports = {
   // PR #8/N — Memory of Actions
   logAction,
   listRecentActions,
+  logBrainEvent,
+  listRecentBrainEvents,
   // Conversation history
   createConversation,
   appendConversationMessage,
