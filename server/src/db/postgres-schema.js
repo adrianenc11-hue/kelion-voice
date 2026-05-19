@@ -291,6 +291,28 @@ CREATE TABLE IF NOT EXISTS demo_requests (
 CREATE INDEX IF NOT EXISTS idx_demo_requests_email ON demo_requests(email);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_demo_requests_code ON demo_requests(demo_code) WHERE demo_code IS NOT NULL;
 
+CREATE TABLE IF NOT EXISTS inbound_emails (
+  id                  BIGSERIAL PRIMARY KEY,
+  provider            TEXT NOT NULL DEFAULT 'resend',
+  provider_message_id TEXT,
+  from_email          TEXT,
+  to_email            TEXT,
+  subject             TEXT,
+  text                TEXT,
+  html                TEXT,
+  raw_json            TEXT,
+  received_at         TIMESTAMPTZ,
+  processed_at        TIMESTAMPTZ,
+  created_at          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_inbound_emails_created
+  ON inbound_emails(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_inbound_emails_processed
+  ON inbound_emails(processed_at, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_inbound_emails_provider_msg
+  ON inbound_emails(provider, provider_message_id)
+  WHERE provider_message_id IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS voice_clones (
   id              BIGSERIAL PRIMARY KEY,
   user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -370,6 +392,7 @@ ALTER TABLE user_files             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE credits_consume_state  ENABLE ROW LEVEL SECURITY;
 ALTER TABLE trial_usage            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE demo_requests           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE inbound_emails          ENABLE ROW LEVEL SECURITY;
 ALTER TABLE voice_clones            ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_tasks             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE vision_revenue            ENABLE ROW LEVEL SECURITY;
@@ -445,6 +468,10 @@ DO $$ BEGIN
   -- Demo requests
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'kelion_service_demo') THEN
     CREATE POLICY kelion_service_demo ON demo_requests FOR ALL USING (true) WITH CHECK (true);
+  END IF;
+  -- Inbound emails
+  IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'kelion_service_inbound_emails') THEN
+    CREATE POLICY kelion_service_inbound_emails ON inbound_emails FOR ALL USING (true) WITH CHECK (true);
   END IF;
   -- Agent tasks
   IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE policyname = 'kelion_service_agent_tasks') THEN

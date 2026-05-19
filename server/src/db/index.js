@@ -512,6 +512,29 @@ async function initDb() {
   await db.exec('CREATE INDEX IF NOT EXISTS idx_demo_requests_email ON demo_requests(email)');
   await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_demo_requests_code ON demo_requests(demo_code) WHERE demo_code IS NOT NULL');
 
+  // Inbound email inbox. Resend Receiving posts raw messages to
+  // /api/inbound/resend; Kelion stores them here so contact@kelionai.app
+  // can be read by the app directly, without forwarding through Gmail.
+  await db.exec(`
+    CREATE TABLE IF NOT EXISTS inbound_emails (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      provider TEXT NOT NULL DEFAULT 'resend',
+      provider_message_id TEXT,
+      from_email TEXT,
+      to_email TEXT,
+      subject TEXT,
+      text TEXT,
+      html TEXT,
+      raw_json TEXT,
+      received_at DATETIME,
+      processed_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_inbound_emails_created ON inbound_emails(created_at DESC)');
+  await db.exec('CREATE INDEX IF NOT EXISTS idx_inbound_emails_processed ON inbound_emails(processed_at, created_at DESC)');
+  await db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_inbound_emails_provider_msg ON inbound_emails(provider, provider_message_id) WHERE provider_message_id IS NOT NULL');
+
   // Multi-voice clone library — stores all cloned voices per user.
   // Replaces the single-voice-per-user model (users.cloned_voice_id).
   // Each row is one ElevenLabs cloned voice with its display name,
@@ -2308,6 +2331,88 @@ async function deleteUserFile(userId, id) {
   return r.changes > 0;
 }
 
+async function insertInboundEmail(input = {}) {
+  const provider = String(input.provider || 'resend').trim().toLowerCase().slice(0, 40) || 'resend';
+  const providerMessageId = input.providerMessageId ? String(input.providerMessageId).slice(0, 300) : null;
+  if (providerMessageId) {
+    const existing = await db.get(
+      'SELECT * FROM inbound_emails WHERE provider = ? AND provider_message_id = ? LIMIT 1',
+      [provider, providerMessageId]
+    );
+    if (existing) return { ...existing, duplicate: true };
+  }
+
+  const fromEmail = input.fromEmail ? String(input.fromEmail).slice(0, 500) : null;
+  const toEmail = input.toEmail ? String(input.toEmail).slice(0, 1000) : null;
+  const subject = input.subject ? String(input.subject).slice(0, 500) : null;
+  const text = input.text ? String(input.text).slice(0, 200000) : null;
+  const html = input.html ? String(input.html).slice(0, 500000) : null;
+  const receivedAt = input.receivedAt ? String(input.receivedAt).slice(0, 80) : null;
+  let rawJson = null;
+  if (input.rawJson !== undefined) {
+    try {
+      rawJson = JSON.stringify(input.rawJson).slice(0, 1000000);
+    } catch (_) {
+      rawJson = String(input.rawJson).slice(0, 1000000);
+    }
+  }
+
+  try {
+    const r = await db.run(
+      `INSERT INTO inbound_emails
+        (provider, provider_message_id, from_email, to_email, subject, text, html, raw_json, received_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [provider, providerMessageId, fromEmail, toEmail, subject, text, html, rawJson, receivedAt]
+    );
+    return db.get('SELECT * FROM inbound_emails WHERE id = ?', [r.lastID]);
+  } catch (err) {
+    if (providerMessageId && /UNIQUE/i.test((err && err.message) || '')) {
+      const existing = await db.get(
+        'SELECT * FROM inbound_emails WHERE provider = ? AND provider_message_id = ? LIMIT 1',
+        [provider, providerMessageId]
+      );
+      if (existing) return { ...existing, duplicate: true };
+    }
+    throw err;
+  }
+}
+
+async function listInboundEmails({ limit = 50, processed = null } = {}) {
+  const cappedLimit = Math.max(1, Math.min(200, Number.parseInt(limit, 10) || 50));
+  let where = '';
+  if (processed === false) where = 'WHERE processed_at IS NULL';
+  if (processed === true) where = 'WHERE processed_at IS NOT NULL';
+  return db.all(
+    `SELECT id, provider, provider_message_id, from_email, to_email, subject, text, html,
+            received_at, processed_at, created_at
+       FROM inbound_emails
+       ${where}
+      ORDER BY COALESCE(received_at, created_at) DESC, id DESC
+      LIMIT ?`,
+    [cappedLimit]
+  );
+}
+
+async function getInboundEmailById(id) {
+  return db.get(
+    `SELECT id, provider, provider_message_id, from_email, to_email, subject, text, html,
+            raw_json, received_at, processed_at, created_at
+       FROM inbound_emails
+      WHERE id = ?`,
+    [id]
+  );
+}
+
+async function markInboundEmailProcessed(id, processed = true) {
+  const r = await db.run(
+    `UPDATE inbound_emails
+        SET processed_at = ${processed ? 'CURRENT_TIMESTAMP' : 'NULL'}
+      WHERE id = ?`,
+    [id]
+  );
+  return r.changes > 0;
+}
+
 module.exports = {
   initDb,
   getDb,
@@ -2436,6 +2541,11 @@ module.exports = {
   listUserFiles,
   getUserFileById,
   deleteUserFile,
+  // Inbound email inbox
+  insertInboundEmail,
+  listInboundEmails,
+  getInboundEmailById,
+  markInboundEmailProcessed,
 };
 
 // ─── Stage 5 helpers ────────────────────────────────────────────────

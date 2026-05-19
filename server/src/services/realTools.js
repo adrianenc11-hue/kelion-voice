@@ -3918,15 +3918,57 @@ async function toolReadCalendar(args, ctx) {
 
 async function toolReadEmail(args, ctx) {
   if (!ctx?.user?.id) return { ok: false, signed_in: false, error: 'Email access requires sign-in.' };
-  if (!process.env.MCP_ENABLED) return { ok: false, unavailable: true, error: 'MCP integrations are not enabled on this server.' };
-  const connected = await googleMcp.hasGoogleConnection(ctx.user.id);
-  if (!connected) {
-    const { url } = googleMcp.getConnectUrl(ctx.user.id);
-    return { ok: false, error: `Google account not connected. Connect at: ${url}`, connectUrl: url };
-  }
   try {
     const query = typeof args?.query === 'string' ? args.query : '';
     const limit = Math.min(Math.max(Number(args?.limit) || 5, 1), 20);
+    const source = String(args?.source || '').trim().toLowerCase();
+    const wantsKelionInbox =
+      ['kelion', 'kelion_inbox', 'inbound', 'contact'].includes(source)
+      || /contact@kelionai\.app|kelion inbox|inbound|inbox intern|casuta kelion/i.test(query);
+
+    if (wantsKelionInbox) {
+      const config = require('../config');
+      const adminEmails = config.getAdminEmails();
+      const isAdmin = ctx.user.role === 'admin'
+        || (ctx.user.email && adminEmails.includes(String(ctx.user.email).toLowerCase()));
+      if (!isAdmin) {
+        return { ok: false, forbidden: true, error: 'Kelion inbound inbox is admin-only.' };
+      }
+      const db = require('../db');
+      const rows = await db.listInboundEmails({ limit: 100 });
+      const q = query
+        .replace(/contact@kelionai\.app/ig, '')
+        .replace(/kelion inbox|inbound|inbox intern|casuta kelion/ig, '')
+        .trim()
+        .toLowerCase();
+      const filtered = q
+        ? rows.filter((row) => {
+            const hay = `${row.from_email || ''} ${row.to_email || ''} ${row.subject || ''} ${row.text || ''}`.toLowerCase();
+            return hay.includes(q);
+          })
+        : rows;
+      return {
+        ok: true,
+        provider: 'kelion_inbound',
+        inbox: 'contact@kelionai.app',
+        emails: filtered.slice(0, limit).map((row) => ({
+          id: row.id,
+          from: row.from_email,
+          to: row.to_email,
+          subject: row.subject,
+          text: row.text ? String(row.text).slice(0, 2000) : null,
+          received_at: row.received_at || row.created_at,
+          processed_at: row.processed_at || null,
+        })),
+      };
+    }
+
+    if (!process.env.MCP_ENABLED) return { ok: false, unavailable: true, error: 'MCP integrations are not enabled on this server.' };
+    const connected = await googleMcp.hasGoogleConnection(ctx.user.id);
+    if (!connected) {
+      const { url } = googleMcp.getConnectUrl(ctx.user.id);
+      return { ok: false, error: `Google account not connected. Connect at: ${url}`, connectUrl: url };
+    }
     return await googleMcp.listEmails(ctx.user.id, { maxResults: limit, query });
   } catch (err) {
     return { ok: false, error: 'Failed to fetch emails: ' + (err?.message || err) };
