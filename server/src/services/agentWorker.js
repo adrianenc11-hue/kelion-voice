@@ -32,7 +32,23 @@ function _intervalFromEnv() {
 function _batchSizeFromEnv() {
   const value = Number(process.env.AGENT_WORKER_BATCH_SIZE);
   if (!Number.isFinite(value) || value < 1) return DEFAULT_BATCH_SIZE;
-  return Math.min(value, 5);
+  return Math.min(value, 20);
+}
+
+function _concurrencyFromEnv() {
+  const value = Number(process.env.AGENT_WORKER_CONCURRENCY);
+  if (!Number.isFinite(value) || value < 1) return 1;
+  return Math.min(value, _batchSizeFromEnv(), 10);
+}
+
+function _autoCommitEnabled() {
+  if (process.env.JEST_WORKER_ID) return false;
+  return process.env.AGENT_AUTO_COMMIT !== '0';
+}
+
+function _autoPrEnabled() {
+  if (process.env.JEST_WORKER_ID) return false;
+  return process.env.AGENT_AUTO_PR !== '0';
 }
 
 async function tick() {
@@ -76,18 +92,26 @@ async function tick() {
       return state.lastResult;
     }
 
+    const concurrency = _concurrencyFromEnv();
     const results = [];
-    for (const task of tasks) {
+    let cursor = 0;
+
+    async function runNext() {
+      const task = tasks[cursor++];
+      if (!task) return;
       const result = await agentOrchestrator.runExistingTask(task.id, {
-        approvedCommit: false,
-        approvedPush: false,
+        approvedCommit: _autoCommitEnabled(),
+        approvedPush: _autoPrEnabled(),
         autonomous: true,
         autonomyStatus: preflight.status,
       });
       results.push({ taskId: task.id, ...result });
       state.processed += 1;
       state.lastRunAt = new Date().toISOString();
+      await runNext();
     }
+
+    await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => runNext()));
 
     state.lastResult = { ok: true, processed: results.length, results };
     return state.lastResult;

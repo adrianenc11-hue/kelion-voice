@@ -4,6 +4,7 @@ const { exec } = require('child_process');
 const { promisify } = require('util');
 const fs = require('fs');
 const execAsync = promisify(exec);
+const agentRepo = require('./agentRepo');
 
 const BLOCKED_COMMANDS = [
   'rm -rf /',
@@ -46,21 +47,25 @@ function rewriteWorkspaceCd(command, cwd) {
 
 function getAllowedCwd() {
   const configured = process.env.AGENT_SHELL_CWD || process.cwd();
-  const cwd = resolveExistingCwd(configured);
-  if (process.env.AGENT_ENABLED === '1' && !process.env.AGENT_SHELL_CWD) {
+  const repo = agentRepo.ensureAgentRepoSync({ requestedCwd: configured });
+  if (repo.ok && repo.cwd) {
     return {
-      ok: false,
-      error: 'AGENT_SHELL_CWD must be set explicitly when AGENT_ENABLED=1.',
+      ok: true,
+      cwd: repo.cwd,
+      warning: repo.warning || (repo.source !== 'existing_git_repo' ? `Agent repo workspace: ${repo.source}` : null),
     };
   }
+  const cwd = resolveExistingCwd(configured);
   if (!cwd) {
-    return { ok: false, error: `No usable shell cwd found. Configured AGENT_SHELL_CWD=${configured}` };
+    return { ok: false, error: repo.error || `No usable shell cwd found. Configured AGENT_SHELL_CWD=${configured}` };
   }
   if (process.env.AGENT_ENABLED === '1' && !hasGitRoot(cwd)) {
     return {
       ok: true,
       cwd,
-      warning: `AGENT_SHELL_CWD is not a git repository root: ${cwd}. Shell commands can run, but Git PR work needs a cloned repo.`,
+      warning: repo.error
+        ? `Agent repo auto-setup failed: ${repo.error}. Shell commands can run, but Git PR work needs a cloned repo.`
+        : `AGENT_SHELL_CWD is not a git repository root: ${cwd}. Shell commands can run, but Git PR work needs a cloned repo.`,
     };
   }
   return { ok: true, cwd, warning: configured !== cwd ? `AGENT_SHELL_CWD fallback used: ${configured} -> ${cwd}` : null };

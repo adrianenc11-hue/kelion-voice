@@ -1198,13 +1198,14 @@ export default function KelionStage() {
     if (UNMUTE_RE.test(text)) { setMuteMode(false); return }
     if (MUTE_RE.test(text)) { setMuteMode(true); return }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  const getTurnContent = useCallback((turn) => String(turn?.text || turn?.transcript || '').trim(), [])
 
   // Watch voice turns — if user said a mute/unmute command by voice, apply it.
   useEffect(() => {
     const last = turns[turns.length - 1]
     if (!last || last.role !== 'user') return
-    applyMuteCommand(last.text)
-  }, [turns, applyMuteCommand])
+    applyMuteCommand(getTurnContent(last))
+  }, [turns, applyMuteCommand, getTurnContent])
 
 
   // chat via the shared 15-min/day IP window on the server. Collapses
@@ -1607,12 +1608,14 @@ export default function KelionStage() {
     const textChatDone = prev === 'thinking' && status === 'idle'
     if (!voiceEnded && !textChatDone) return
     if (!authState.signedIn) return
-    const snapshot = turnsRef.current.filter((t) => t && t.role && t.text && t.text.trim())
+    const snapshot = turnsRef.current
+      .map((t) => ({ role: t?.role, text: getTurnContent(t) }))
+      .filter((t) => t && t.role && t.text)
     if (snapshot.length < 2) return
     extractAndStore(snapshot).catch((err) => {
       console.warn('[memory extract]', err.message)
     })
-  }, [status, authState.signedIn])
+  }, [status, authState.signedIn, getTurnContent])
 
   const openMemory = useCallback(async () => {
     setMemoryOpen(true)
@@ -1637,7 +1640,9 @@ export default function KelionStage() {
       setRememberPromptOpen(false)
       // Immediately extract facts from what was said so far, so the next
       // session opens with real memory.
-      const snapshot = turnsRef.current.filter((t) => t && t.role && t.text && t.text.trim())
+      const snapshot = turnsRef.current
+        .map((t) => ({ role: t?.role, text: getTurnContent(t) }))
+        .filter((t) => t && t.role && t.text)
       if (snapshot.length >= 2) {
         extractAndStore(snapshot).catch(() => {})
       }
@@ -1646,7 +1651,7 @@ export default function KelionStage() {
     } finally {
       setRememberBusy(false)
     }
-  }, [])
+  }, [getTurnContent])
 
   const handleSignInExisting = useCallback(async () => {
     setRememberBusy(true)
@@ -1749,12 +1754,13 @@ export default function KelionStage() {
   // so Kelion continues the conversation instead of re-greeting.
   const startVoiceWithPriorTurns = useCallback(() => {
     const clean = turnsRef.current
-      .filter((t) => t && t.role && t.text && String(t.text).trim())
-      .map((t) => ({ role: t.role === 'assistant' ? 'assistant' : 'user', text: String(t.text) }))
+      .map((t) => ({ role: t?.role, text: getTurnContent(t) }))
+      .filter((t) => t && t.role && t.text)
+      .map((t) => ({ role: t.role === 'assistant' ? 'assistant' : 'user', text: t.text }))
       .slice(-20)
     try { start(clean.length > 0 ? { priorTurns: clean } : undefined) }
     catch (_) { /* banner surfaces failure */ }
-  }, [start])
+  }, [start, getTurnContent])
 
   const [intendedVoiceActive, setIntendedVoiceActive] = useState(false)
 

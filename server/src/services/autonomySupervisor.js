@@ -5,7 +5,7 @@ const { runEnvAudit } = require('./envAudit');
 const CAPABILITY_NAMES = {
   models: ['OpenRouter API Key'],
   git: ['GitHub Token', 'Master Branch Protection'],
-  shell: ['AGENT_ENABLED', 'AGENT_SHELL_CWD'],
+  shell: ['AGENT_ENABLED'],
   persistence: ['DATABASE_URL (Postgres)', 'Secrets'],
   research: ['Google Search (Agent)'],
   tools: ['Tool Catalog'],
@@ -16,7 +16,7 @@ const ACTIONS = {
   'GitHub Token': 'Set GITHUB_TOKEN, AGENT_GITHUB_TOKEN, or GH_TOKEN with repo access.',
   'Google Search (Agent)': 'Set AGENT_GOOGLE_API_KEY and AGENT_GOOGLE_CX for independent web research.',
   AGENT_ENABLED: 'Set AGENT_ENABLED=1.',
-  AGENT_SHELL_CWD: 'Set AGENT_SHELL_CWD to the repository root.',
+  AGENT_SHELL_CWD: 'Optional. Set only if you want to override the auto-cloned repository root.',
   'Master Branch Protection': 'Protect master and require Pull Requests/status checks before merge.',
   'DATABASE_URL (Postgres)': 'Set DATABASE_URL to durable Postgres for production memory/state.',
   Secrets: 'Set SESSION_SECRET and JWT_SECRET.',

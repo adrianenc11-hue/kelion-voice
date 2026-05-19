@@ -2465,12 +2465,12 @@ async function toolCommitAndPushToGithub(args) {
   }
 
   const msg = args.commit_message || 'Update from Kelion';
-  const branch = args.branch || 'HEAD';
+  const branch = args.branch || `kelion/auto-${Date.now()}`;
   const token = process.env.GITHUB_TOKEN;
 
   try {
     const { execSync } = require('child_process');
-    const rootDir = process.cwd();
+    const rootDir = REPO_ROOT;
 
     // Config git user if missing
     try { execSync('git config user.name', { cwd: rootDir }); } catch {
@@ -2479,12 +2479,7 @@ async function toolCommitAndPushToGithub(args) {
     }
 
     // Set remote URL with token securely
-    const originUrl = `https://x-access-token:${token}@github.com/adrianenc11-hue/kelionai-v2.git`;
-    try {
-      execSync(`git remote set-url origin ${originUrl}`, { cwd: rootDir });
-    } catch {
-      execSync(`git remote add origin ${originUrl}`, { cwd: rootDir });
-    }
+    agentRepo.configureRemote(rootDir);
 
     execSync('git add .', { cwd: rootDir });
 
@@ -2494,12 +2489,16 @@ async function toolCommitAndPushToGithub(args) {
       return { ok: true, skipped: true, result: "No changes to commit." };
     }
 
-    execSync(`git commit -m "${msg.replace(/"/g, '\\"')}"`, { cwd: rootDir });
-    execSync(`git push origin ${branch}`, { cwd: rootDir });
+    const safeBranch = String(branch || '').trim();
+    if (!_isSafePrBranch(safeBranch)) {
+      return { ok: false, error: 'Push requires a non-master feature branch. Direct push to master/main is blocked.' };
+    }
+    execSync(`git commit -m ${gitQuote(msg)}`, { cwd: rootDir });
+    execSync(`git push -u origin ${gitQuote(safeBranch)}:${gitQuote(safeBranch)}`, { cwd: rootDir });
 
-    return { ok: true, result: `Successfully committed with message '${msg}' and pushed to ${branch}.` };
+    return { ok: true, result: `Successfully committed with message '${msg}' and pushed to ${safeBranch}.` };
   } catch (err) {
-    return { ok: false, error: err.message, stderr: err.stderr ? err.stderr.toString() : null };
+    return { ok: false, error: agentRepo.redact(err.message), stderr: err.stderr ? agentRepo.redact(err.stderr.toString()) : null };
   }
 }
 
@@ -2737,9 +2736,11 @@ const _fs = require('fs');
 const _cp = require('child_process');
 const _util = require('util');
 const _exec = _util.promisify(_cp.exec);
+const agentRepo = require('./agentRepo');
 
 // Path to the repository root
-const REPO_ROOT = _path.resolve(__dirname, '../../../');
+const _repoInfo = agentRepo.ensureAgentRepoSync();
+const REPO_ROOT = _repoInfo.ok && _repoInfo.cwd ? _repoInfo.cwd : _path.resolve(__dirname, '../../../');
 
 function configuredRepoSlug() {
   const owner = String(process.env.GITHUB_REPO_OWNER || 'adrianenc11-hue').trim();
@@ -2755,6 +2756,10 @@ function normalizeGithubRepoSlug(args = {}) {
     .replace(/^https?:\/\/github\.com\//i, '')
     .replace(/\.git$/i, '')
     .replace(/\/$/, '');
+}
+
+function gitQuote(value) {
+  return `"${String(value).replace(/"/g, '\\"')}"`;
 }
 
 function resolveToolCwd(raw) {
@@ -3174,7 +3179,11 @@ async function _ghApi(path, method = 'GET', body = null) {
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
   const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.message || `GitHub API ${res.status}`);
+  if (!res.ok) {
+    const err = new Error(data.message || `GitHub API ${res.status}`);
+    err.status = res.status;
+    throw err;
+  }
   return data;
 }
 
@@ -3183,10 +3192,13 @@ async function toolCreateGithubPr(args) {
     const title = String(args?.title || 'Automated Kelion PR');
     const branch = String(args?.branch || 'feat/kelion-auto-' + Date.now()).trim();
     const message = String(args?.message || 'feat: automated updates');
+    const body = String(args?.body || 'Automated PR from Kelion.');
 
     if (!_isSafePrBranch(branch)) {
       return { ok: false, error: 'create_github_pr requires a non-master feature branch.' };
     }
+
+    agentRepo.configureRemote(REPO_ROOT);
 
     let gitStatus = '';
     try {
@@ -3194,29 +3206,50 @@ async function toolCreateGithubPr(args) {
       gitStatus = st.stdout;
     } catch (e) { }
 
-    if (!gitStatus.trim()) {
-      return { ok: false, error: 'No changes to commit' };
+    if (gitStatus.trim()) {
+      await _exec('git fetch origin master --prune', { cwd: REPO_ROOT, timeout: 60000 });
+      const current = await _exec('git branch --show-current', { cwd: REPO_ROOT });
+      if (current.stdout.trim() !== branch) {
+        await _exec(`git checkout -B ${gitQuote(branch)} origin/master`, { cwd: REPO_ROOT, timeout: 60000 });
+      }
+      await _exec('git add .', { cwd: REPO_ROOT });
+      await _exec(`git commit -m ${gitQuote(message)}`, { cwd: REPO_ROOT });
+      await _exec(`git push -u origin ${gitQuote(branch)}:${gitQuote(branch)}`, { cwd: REPO_ROOT, timeout: 60000 });
+    } else {
+      try {
+        await _exec(`git rev-parse --verify ${gitQuote(branch)}`, { cwd: REPO_ROOT });
+      } catch (_) {
+        try {
+          await _exec(`git fetch origin ${gitQuote(branch)}:${gitQuote(branch)}`, { cwd: REPO_ROOT, timeout: 60000 });
+        } catch {
+          return { ok: false, error: `No local changes and branch ${branch} was not found locally or on origin.` };
+        }
+      }
     }
 
-    await _exec(`git checkout -b "${branch}"`, { cwd: REPO_ROOT });
-    await _exec(`git add .`, { cwd: REPO_ROOT });
-    await _exec(`git commit -m "${message.replace(/"/g, '\\"')}"`, { cwd: REPO_ROOT });
-    await _exec(`git push -u origin "${branch}"`, { cwd: REPO_ROOT });
-
-    // Create PR via GitHub REST API — merge is always manual by the admin
-    const pr = await _ghApi('/pulls', 'POST', {
-      title,
-      head: branch,
-      base: 'master',
-      body: 'Automated PR from Kelion.',
-    });
+    let pr;
+    try {
+      pr = await _ghApi('/pulls', 'POST', {
+        title,
+        head: branch,
+        base: 'master',
+        body,
+      });
+    } catch (err) {
+      if (err.status === 422) {
+        const prs = await _ghApi(`/pulls?state=open&head=${encodeURIComponent(`${configuredRepoSlug().split('/')[0]}:${branch}`)}`);
+        if (Array.isArray(prs) && prs.length) {
+          return { ok: true, url: prs[0].html_url, pr_number: prs[0].number, existing: true };
+        }
+      }
+      throw err;
+    }
 
     return { ok: true, url: pr.html_url, pr_number: pr.number };
   } catch (err) {
-    return { ok: false, error: err.message };
+    return { ok: false, error: agentRepo.redact(err.message) };
   }
 }
-
 async function toolManageGithubPrs(args) {
   try {
     const action = args?.action;
@@ -5243,9 +5276,10 @@ async function toolSelfEvaluate(args) {
       : `npx jest "${testPath}" --runInBand --forceExit --testTimeout=30000 2>&1`;
     const { stdout, stderr } = await _exec(cmd, { cwd: _path.join(REPO_ROOT, 'server'), timeout: 180000 });
     const output = stdout || stderr || '';
-    const passed = /Tests:\s*\d+\s*passed/.test(output) && !/failed/.test(output);
-    const failedMatch = output.match(/Tests:\s*(\d+)\s*passed.*?,(\s*\d+)\s*failed/);
-    const totalFailed = failedMatch ? parseInt(failedMatch[2], 10) : 0;
+    const testsLine = output.match(/Tests:[^\n]+/)?.[0] || '';
+    const passed = /\b\d+\s+passed\b/.test(testsLine) && !/\b\d+\s+failed\b/.test(testsLine);
+    const failedMatch = testsLine.match(/\b(\d+)\s+failed\b/);
+    const totalFailed = failedMatch ? parseInt(failedMatch[1], 10) : 0;
     return {
       ok: true,
       scope,
@@ -5256,7 +5290,15 @@ async function toolSelfEvaluate(args) {
     };
   } catch (err) {
     const output = err.stdout || err.stderr || err.message || '';
-    return { ok: false, error: `Self-evaluation failed: ${output.slice(0, 300)}`, scope };
+    return {
+      ok: true,
+      scope,
+      passed: false,
+      total_failed: 1,
+      summary: output.match(/Test Suites:[^\n]+/)?.[0] || 'Self-evaluation completed with failures',
+      output_tail: output.slice(-1500),
+      error: `Self-evaluation reported failing checks: ${output.slice(0, 300)}`,
+    };
   }
 }
 
@@ -5541,7 +5583,15 @@ async function toolDevopsToolkit(args) {
   if (action === 'repo_info') return toolGithubRepoInfo({ repo: args?.repo });
   if (action === 'list_files') return toolListGithubRepoFiles({ repo: args?.repo, branch: args?.branch });
   if (action === 'read_file') return toolReadGithubFile({ repo: args?.repo, path: args?.path, branch: args?.branch });
-  if (action === 'create_pr') return toolCreateGithubPr({ repo: args?.repo, title: args?.title, body: args?.body });
+  if (action === 'create_pr') {
+    return toolCreateGithubPr({
+      repo: args?.repo,
+      title: args?.title,
+      body: args?.body,
+      branch: args?.branch,
+      message: args?.message || args?.commit_message,
+    });
+  }
   if (action === 'manage_prs') return toolManageGithubPrs({ repo: args?.repo, action: args?.pr_action, issue_number: args?.issue_number });
   return { ok: false, error: 'Unknown action for devops_toolkit.' };
 }

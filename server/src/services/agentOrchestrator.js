@@ -229,6 +229,16 @@ function _narrateStep(step, result) {
   return `${verb} — ${result.ok ? 'OK' : 'eroare'}.`;
 }
 
+function _progressNarrativesEnabled() {
+  return process.env.AGENT_VERBOSE_PROGRESS === '1';
+}
+
+function _pushNarrative(state, entry, options = {}) {
+  if (options.always || _progressNarrativesEnabled()) {
+    state.narratives.push({ ...entry, ts: entry.ts || new Date().toISOString() });
+  }
+}
+
 // ── LLM Plan Generation ──
 /**
  * Ask the heavy coder model to produce a structured JSON plan.
@@ -254,6 +264,11 @@ Rules:
 5. Then "git_status".
 6. Last "commit" with a conventional commit message.
 7. If deployment is needed, add "pr" step to create a pull request.
+8. If a dependency or tool is needed permanently, persist it in package.json/package-lock.json,
+   requirements.txt, Dockerfile, nixpacks.toml, railway.json, or the repo's build config.
+   Never declare the task complete when an install only exists in the running container.
+9. You may install missing dependencies yourself with shell commands, then commit the manifest/config
+   changes and open a PR to master.
 
 Supported types:
 - Code: read, write, shell, test, build, lint, validate, git_status, branch, commit, push, pr
@@ -499,10 +514,14 @@ async function _executeStep(taskId, step, state) {
     r = { ok: false, error: err.message };
   }
 
-  // Narrative — voice-ready sentence for Kelion TTS
+  // Keep internal work silent by default; expose only blockers/errors.
   const narrative = _narrateStep(step, r);
-  state.narratives.push({ stepId: step.id, type: step.type, narrative, ts: new Date().toISOString() });
-  log('narrative', { text: narrative });
+  _pushNarrative(state, { stepId: step.id, type: step.type, narrative }, {
+    always: Boolean(r.blocked || r.pendingApproval || !r.ok),
+  });
+  if (_progressNarrativesEnabled() || r.blocked || r.pendingApproval || !r.ok) {
+    log('narrative', { text: narrative });
+  }
 
   // Persist incremental state so resume / revert / UI work across restarts.
   await _saveState(taskId, state);
@@ -523,7 +542,7 @@ async function _executeStep(taskId, step, state) {
  */
 async function _autoRepair(taskId, failedStep, state, iteration = 1) {
   if (iteration > MAX_REPAIR_ITERATIONS) {
-    state.narratives.push({ stepId: failedStep.id, type: 'repair', narrative: `Repararea automată a eșuat după ${MAX_REPAIR_ITERATIONS} încercări. Aștept aprobarea ta.`, ts: new Date().toISOString() });
+    _pushNarrative(state, { stepId: failedStep.id, type: 'repair', narrative: `Repararea automată a eșuat după ${MAX_REPAIR_ITERATIONS} încercări. Aștept aprobarea ta.` }, { always: true });
     return { ok: false, repaired: false };
   }
 
@@ -561,7 +580,7 @@ Rules:
       const wr = await agentFs.writeFile(fix.path, fix.content);
       state.fileCache[fix.path] = fix.content;
       state.modifiedPaths.add(fix.path);
-      state.narratives.push({ stepId: failedStep.id, type: 'repair', narrative: `Repar eroarea automat – încercarea ${iteration}. ${fix.reason || ''}`, ts: new Date().toISOString() });
+      _pushNarrative(state, { stepId: failedStep.id, type: 'repair', narrative: `Repar eroarea automat – încercarea ${iteration}. ${fix.reason || ''}` });
       return { ok: wr.ok, repaired: wr.ok };
     }
   } catch (e) {
@@ -625,8 +644,8 @@ async function _startTaskLocked(description, options = {}) {
     repairCount: 0,
   };
 
-  // Narrative: Kelion speaks what it is about to do
-  state.narratives.push({ stepId: 0, type: 'speak', narrative: `Pornesc task-ul: ${description.slice(0, 200)}. Generez planul de lucru.`, ts: new Date().toISOString() });
+  // Keep autonomous work silent by default; the monitor shows progress.
+  _pushNarrative(state, { stepId: 0, type: 'speak', narrative: `Pornesc task-ul: ${description.slice(0, 200)}. Generez planul de lucru.` });
 
   // 1. Generate plan
   const rawPlan = await _generatePlan(description, codebaseSummary);
@@ -642,7 +661,7 @@ async function _startTaskLocked(description, options = {}) {
 
     if (result.blocked) {
       state.status = 'blocked';
-      state.narratives.push({ stepId: step.id, type: 'speak', narrative: 'Am oprit execuția – acțiunea este blocată de regulile de siguranță.', ts: new Date().toISOString() });
+      _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: 'Am oprit execuția – acțiunea este blocată de regulile de siguranță.' }, { always: true });
       state.statusDetail = `Blocat la pasul ${step.id}: ${step.type}`;
       await updateTask(taskId, { status: 'blocked', status_detail: state.statusDetail });
       break;
@@ -650,7 +669,7 @@ async function _startTaskLocked(description, options = {}) {
 
     if (result.pendingApproval) {
       state.status = 'pending_approval';
-      state.narratives.push({ stepId: step.id, type: 'speak', narrative: 'Am terminat modificările. Aștept aprobarea ta pentru commit și push.', ts: new Date().toISOString() });
+      _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: 'Am terminat modificările. Aștept aprobarea ta pentru commit și push.' }, { always: true });
       state.statusDetail = `Aștept aprobare la pasul ${step.id}: ${step.type}`;
       await updateTask(taskId, { status: 'pending_approval', status_detail: state.statusDetail });
       break;
@@ -658,7 +677,7 @@ async function _startTaskLocked(description, options = {}) {
 
     // Validation / test / build failure → Stop → Repair → Resume
     if (!result.ok && (step.type === 'test' || step.type === 'build' || step.type === 'validate' || step.type === 'lint')) {
-      state.narratives.push({ stepId: step.id, type: 'speak', narrative: `Validarea ${step.type} a eșuat. Încep repararea automată – încercarea ${state.repairCount + 1}.`, ts: new Date().toISOString() });
+      _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: `Validarea ${step.type} a eșuat. Încep repararea automată – încercarea ${state.repairCount + 1}.` });
 
       const repair = await _autoRepair(taskId, step, state, state.repairCount + 1);
       if (repair.repaired) {
@@ -666,14 +685,14 @@ async function _startTaskLocked(description, options = {}) {
         // Re-run the SAME step after repair
         const retry = await _executeStep(taskId, { ...step, iteration: state.repairCount }, state);
         if (retry.ok) {
-          state.narratives.push({ stepId: step.id, type: 'speak', narrative: `Repararea a funcționat. Validarea ${step.type} a trecut.`, ts: new Date().toISOString() });
+          _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: `Repararea a funcționat. Validarea ${step.type} a trecut.` });
           continue; // continue to next step
         }
       }
 
       // Repair failed or exhausted
       state.status = 'needs_review';
-      state.narratives.push({ stepId: step.id, type: 'speak', narrative: `Nu am reușit să repar automat după ${state.repairCount} încercări. Te rog să verifici și să aprobi manual.`, ts: new Date().toISOString() });
+      _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: `Nu am reușit să repar automat după ${state.repairCount} încercări. Te rog să verifici și să aprobi manual.` }, { always: true });
       state.statusDetail = `Reparare eșuată la pasul ${step.id}: ${step.type}`;
       await updateTask(taskId, { status: 'needs_review', status_detail: state.statusDetail });
       break;
@@ -682,7 +701,7 @@ async function _startTaskLocked(description, options = {}) {
     // Non-validation step failed → fail fast
     if (!result.ok) {
       state.status = 'failed';
-      state.narratives.push({ stepId: step.id, type: 'speak', narrative: `Eroare la pasul ${step.type}. Oprire rapidă pentru siguranță.`, ts: new Date().toISOString() });
+      _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: `Eroare la pasul ${step.type}. Oprire rapidă pentru siguranță.` }, { always: true });
       state.statusDetail = `Eșec la pasul ${step.id}: ${step.type}`;
       await updateTask(taskId, { status: 'failed', status_detail: state.statusDetail });
       break;
@@ -692,13 +711,13 @@ async function _startTaskLocked(description, options = {}) {
   if (state.status === 'executing' && state.modifiedPaths?.size && plan.steps.some(s => s.type === 'commit' || s.type === 'push' || s.type === 'pr') && !state.prUrl) {
     state.status = 'blocked';
     state.statusDetail = 'Blocked: code changed, but no pull request URL exists.';
-    state.narratives.push({ stepId: 999, type: 'speak', narrative: 'Nu declar task-ul finalizat: exista modificari, dar nu exista pull request catre master.', ts: new Date().toISOString() });
+    _pushNarrative(state, { stepId: 999, type: 'speak', narrative: 'Nu declar task-ul finalizat: exista modificari, dar nu exista pull request catre master.' }, { always: true });
     await updateTask(taskId, { status: 'blocked', status_detail: state.statusDetail });
   }
 
   if (state.status === 'executing') {
     state.status = 'done';
-    state.narratives.push({ stepId: 999, type: 'speak', narrative: 'Task finalizat cu succes. Toate validările au trecut.', ts: new Date().toISOString() });
+    _pushNarrative(state, { stepId: 999, type: 'speak', narrative: 'Task finalizat cu succes. Toate validările au trecut.' }, { always: true });
     state.statusDetail = `Complet – ${plan.steps.length} pași`;
     await updateTask(taskId, { status: 'done', status_detail: state.statusDetail });
   }
@@ -709,7 +728,7 @@ async function _startTaskLocked(description, options = {}) {
     if (!assessment.complete) {
       state.autonomyIteration = (state.autonomyIteration || 0) + 1;
       state.status = 'executing';
-      state.narratives.push({ stepId: 0, type: 'speak', narrative: `Iterația ${state.autonomyIteration}: ${assessment.reason}. Regeneez plan.`, ts: new Date().toISOString() });
+      _pushNarrative(state, { stepId: 0, type: 'speak', narrative: `Iterația ${state.autonomyIteration}: ${assessment.reason}. Regeneez plan.` });
       await _saveState(taskId, state);
 
       // Re-plan with context from previous iteration
@@ -796,7 +815,7 @@ async function approveTask(taskId, { commit = false, push = false } = {}) {
     statusDetail:     task.status_detail || task.status,
   };
 
-  state.narratives.push({ stepId: 0, type: 'speak', narrative: `Aprobare primită. commit=${commit ? 'DA' : 'NU'} push=${push ? 'DA' : 'NU'}`, ts: new Date().toISOString() });
+  _pushNarrative(state, { stepId: 0, type: 'speak', narrative: `Aprobare primită. commit=${commit ? 'DA' : 'NU'} push=${push ? 'DA' : 'NU'}` });
 
   // If there was a pending commit step, re-execute it now that we are approved.
   if (commit && state.plan?.steps) {
@@ -837,14 +856,13 @@ async function approveTask(taskId, { commit = false, push = false } = {}) {
   state.statusDetail = state.prUrl
     ? `Complete - PR created: ${state.prUrl}`
     : 'Complete - approved';
-  state.narratives.push({
+  _pushNarrative(state, {
     stepId: 999,
     type: 'speak',
     narrative: state.prUrl
       ? `Aprobarea s-a incheiat cu pull request creat: ${state.prUrl}`
       : 'Aprobarea s-a incheiat.',
-    ts: new Date().toISOString(),
-  });
+  }, { always: true });
   await _saveState(taskId, state);
   return { ok: true, taskId, approvedCommit: commit, approvedPush: push, narratives: state.narratives };
 }

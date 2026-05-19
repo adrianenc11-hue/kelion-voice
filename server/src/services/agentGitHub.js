@@ -83,6 +83,10 @@ async function createPr(branch, title, body = '', base = REQUIRED_PR_BASE) {
     };
   }
   if (!result.ok && result.status === 422) {
+    const existing = await githubRequest(`/pulls?state=open&head=${encodeURIComponent(`${REPO_OWNER}:${branch}`)}`);
+    if (existing.ok && Array.isArray(existing.data) && existing.data.length) {
+      return { ok: true, data: existing.data[0], existing: true };
+    }
     return {
       ...result,
       error: `GitHub rejected PR creation. The branch may already have an open PR or no diff against ${REQUIRED_PR_BASE}: ${result.error}`,
