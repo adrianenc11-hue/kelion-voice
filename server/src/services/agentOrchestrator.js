@@ -170,9 +170,12 @@ function isShellAllowed(cmd) {
  */
 async function _saveState(taskId, state) {
   try {
+    const statusDetail = state.prUrl
+      ? `${state.statusDetail || state.status} | PR: ${state.prUrl}`
+      : (state.statusDetail || state.status);
     await updateTask(taskId, {
       status: state.status,
-      status_detail: state.statusDetail || state.status,
+      status_detail: statusDetail,
       narratives: state.narratives,
       logs: state.logs,
       plan: state.plan,
@@ -409,6 +412,10 @@ async function _executeStep(taskId, step, state) {
           break;
         }
         r = await agentGitHub.createPr(branch, step.title, step.body);
+        if (r.ok) {
+          state.prUrl = r.data?.html_url || r.data?.url || null;
+          state.prNumber = r.data?.number || null;
+        }
         log('pr', { branch, ok: r.ok });
         break;
       }
@@ -673,6 +680,13 @@ async function _startTaskLocked(description, options = {}) {
     }
   }
 
+  if (state.status === 'executing' && state.modifiedPaths?.size && plan.steps.some(s => s.type === 'commit' || s.type === 'push' || s.type === 'pr') && !state.prUrl) {
+    state.status = 'blocked';
+    state.statusDetail = 'Blocked: code changed, but no pull request URL exists.';
+    state.narratives.push({ stepId: 999, type: 'speak', narrative: 'Nu declar task-ul finalizat: exista modificari, dar nu exista pull request catre master.', ts: new Date().toISOString() });
+    await updateTask(taskId, { status: 'blocked', status_detail: state.statusDetail });
+  }
+
   if (state.status === 'executing') {
     state.status = 'done';
     state.narratives.push({ stepId: 999, type: 'speak', narrative: 'Task finalizat cu succes. Toate validările au trecut.', ts: new Date().toISOString() });
@@ -702,7 +716,7 @@ async function _startTaskLocked(description, options = {}) {
         }
         if (result.blocked || result.pendingApproval || !result.ok) break;
       }
-      if (state.status === 'executing') state.status = 'done';
+      if (state.status === 'executing') state.status = state.modifiedPaths?.size && !state.prUrl ? 'blocked' : 'done';
     }
   }
 
@@ -794,6 +808,17 @@ async function approveTask(taskId, { commit = false, push = false } = {}) {
   }
 
   state.status = 'done';
+  state.statusDetail = state.prUrl
+    ? `Complete - PR created: ${state.prUrl}`
+    : 'Complete - approved';
+  state.narratives.push({
+    stepId: 999,
+    type: 'speak',
+    narrative: state.prUrl
+      ? `Aprobarea s-a incheiat cu pull request creat: ${state.prUrl}`
+      : 'Aprobarea s-a incheiat.',
+    ts: new Date().toISOString(),
+  });
   await _saveState(taskId, state);
   return { ok: true, taskId, approvedCommit: commit, approvedPush: push, narratives: state.narratives };
 }

@@ -1158,10 +1158,14 @@ async function checkProviderBalances() {
 }
 
 // Start watchdog after a 60s boot delay (let DB + providers init).
-setTimeout(() => {
-  checkProviderBalances();
-  setInterval(checkProviderBalances, WATCHDOG_INTERVAL_MS).unref();
-}, 60_000).unref();
+// In Jest, leaving this timer alive can fire after teardown and turn a fully
+// passing suite into a false failure.
+if (process.env.NODE_ENV !== 'test') {
+  setTimeout(() => {
+    checkProviderBalances();
+    setInterval(checkProviderBalances, WATCHDOG_INTERVAL_MS).unref();
+  }, 60_000).unref();
+}
 
 // ── Health Watchdog Dashboard ──
 // GET /api/admin/health — live health report from permanent watchdog
