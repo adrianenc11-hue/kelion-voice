@@ -33,6 +33,8 @@ afterEach(() => {
   delete process.env.TWILIO_AUTH_TOKEN;
   delete process.env.TWILIO_FROM;
   delete process.env.GITHUB_TOKEN;
+  delete process.env.GITHUB_REPO_OWNER;
+  delete process.env.GITHUB_REPO_NAME;
 });
 
 // ───────────────────────── catalog regression ─────────────────────
@@ -291,6 +293,28 @@ describe('github_repo_info', () => {
     };
     await toolGithubRepoInfo({ repo: 'a/b' });
     expect(captured.init.headers.Authorization).toBe('Bearer ghp_abc');
+  });
+
+  test('uses configured repository when repo slug is omitted', async () => {
+    process.env.GITHUB_REPO_OWNER = 'adrianenc11-hue';
+    process.env.GITHUB_REPO_NAME = 'kelionai-v2';
+    let captured = null;
+    globalThis.fetch = async (url, init) => {
+      captured = { url, init };
+      return {
+        ok: true, status: 200,
+        json: async () => ({
+          full_name: 'adrianenc11-hue/kelionai-v2',
+          html_url: 'https://github.com/adrianenc11-hue/kelionai-v2',
+        }),
+      };
+    };
+
+    const r = await toolGithubRepoInfo({});
+
+    expect(r.ok).toBe(true);
+    expect(r.fullName).toBe('adrianenc11-hue/kelionai-v2');
+    expect(captured.url).toBe('https://api.github.com/repos/adrianenc11-hue/kelionai-v2');
   });
 
   test('returns 404 cleanly for missing repo', async () => {

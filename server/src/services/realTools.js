@@ -2512,9 +2512,7 @@ function validSlugRepo(s) {
 }
 
 async function toolListGithubRepoFiles(args) {
-  let slug = String(args?.repo || args?.slug || '').trim();
-  if (!slug && args?.owner && args?.name) slug = `${args.owner}/${args.name}`;
-  slug = slug.replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/$/, '');
+  const slug = normalizeGithubRepoSlug(args);
   if (!validSlugRepo(slug)) return { ok: false, error: 'invalid repo slug (expected owner/name)' };
   const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'kelion-ai-tools' };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
@@ -2539,9 +2537,7 @@ async function toolListGithubRepoFiles(args) {
 }
 
 async function toolReadGithubFile(args) {
-  let slug = String(args?.repo || args?.slug || '').trim();
-  if (!slug && args?.owner && args?.name) slug = `${args.owner}/${args.name}`;
-  slug = slug.replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/$/, '');
+  const slug = normalizeGithubRepoSlug(args);
   if (!validSlugRepo(slug)) return { ok: false, error: 'invalid repo slug (expected owner/name)' };
   const path = String(args?.path || '').trim();
   if (!path) return { ok: false, error: 'missing file path' };
@@ -2570,9 +2566,7 @@ async function toolReadGithubFile(args) {
 }
 
 async function toolGithubRepoInfo(args) {
-  let slug = String(args?.repo || args?.slug || '').trim();
-  if (!slug && args?.owner && args?.name) slug = `${args.owner}/${args.name}`;
-  slug = slug.replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/$/, '');
+  const slug = normalizeGithubRepoSlug(args);
   if (!validSlugRepo(slug)) return { ok: false, error: 'invalid repo slug (expected owner/name)' };
   const headers = { Accept: 'application/vnd.github+json', 'User-Agent': 'kelion-ai-tools' };
   if (process.env.GITHUB_TOKEN) headers.Authorization = `Bearer ${process.env.GITHUB_TOKEN}`;
@@ -2607,9 +2601,7 @@ async function toolGithubRepoInfo(args) {
 }
 
 async function toolGetGithubIssues(args) {
-  let slug = String(args?.repo || args?.slug || '').trim();
-  if (!slug && args?.owner && args?.name) slug = `${args.owner}/${args.name}`;
-  slug = slug.replace(/^https?:\/\/github\.com\//i, '').replace(/\.git$/i, '').replace(/\/$/, '');
+  const slug = normalizeGithubRepoSlug(args);
   if (!validSlugRepo(slug)) return { ok: false, error: 'invalid repo slug (expected owner/name)' };
   const state = ['open', 'closed', 'all'].includes(args?.state) ? args.state : 'open';
 
@@ -2749,6 +2741,35 @@ const _exec = _util.promisify(_cp.exec);
 // Path to the repository root
 const REPO_ROOT = _path.resolve(__dirname, '../../../');
 
+function configuredRepoSlug() {
+  const owner = String(process.env.GITHUB_REPO_OWNER || 'adrianenc11-hue').trim();
+  const name = String(process.env.GITHUB_REPO_NAME || 'kelionai-v2').trim();
+  return `${owner}/${name}`;
+}
+
+function normalizeGithubRepoSlug(args = {}) {
+  let slug = String(args?.repo || args?.slug || '').trim();
+  if (!slug && args?.owner && args?.name) slug = `${args.owner}/${args.name}`;
+  if (!slug) slug = configuredRepoSlug();
+  return slug
+    .replace(/^https?:\/\/github\.com\//i, '')
+    .replace(/\.git$/i, '')
+    .replace(/\/$/, '');
+}
+
+function resolveToolCwd(raw) {
+  if (!raw) return REPO_ROOT;
+  const value = String(raw).trim();
+  if (!value || value === '/workspace' || value === '/app') return REPO_ROOT;
+  return _path.isAbsolute(value) ? value : _path.resolve(REPO_ROOT, value);
+}
+
+function rewriteWorkspaceCds(command, cwd) {
+  return String(command || '')
+    .replace(/(^|&&|\|\||;)\s*cd\s+["']?\/workspace["']?\s*(&&|;)/g, `$1 cd "${cwd}" $2`)
+    .replace(/(^|&&|\|\||;)\s*cd\s+["']?\/app["']?\s*(&&|;)/g, `$1 cd "${cwd}" $2`);
+}
+
 function isPathSafe(p) {
   const normalized = p.toLowerCase();
   if (normalized.includes('c:\\windows')) return false;
@@ -2768,7 +2789,7 @@ async function toolRunTerminalCommand(args) {
 
     let targetCwd = REPO_ROOT;
     if (args?.cwd) {
-      targetCwd = _path.resolve(REPO_ROOT, args.cwd);
+      targetCwd = resolveToolCwd(args.cwd);
       if (!_fs.existsSync(targetCwd)) {
         _fs.mkdirSync(targetCwd, { recursive: true });
       }
@@ -2776,8 +2797,9 @@ async function toolRunTerminalCommand(args) {
 
     // Admin autonomy: 120s timeout (was 30s), 20k output (was 5k)
     const timeout = Number(args?.timeout) || 120000;
-    const { stdout, stderr } = await _exec(cmd, { cwd: targetCwd, timeout });
-    return { ok: true, stdout: stdout.slice(0, 20000), stderr: stderr.slice(0, 20000) };
+    const command = rewriteWorkspaceCds(cmd, targetCwd);
+    const { stdout, stderr } = await _exec(command, { cwd: targetCwd, timeout });
+    return { ok: true, stdout: stdout.slice(0, 20000), stderr: stderr.slice(0, 20000), cwd: targetCwd };
   } catch (err) {
     return { ok: false, error: err.message, stdout: (err.stdout || '').slice(0, 20000), stderr: (err.stderr || '').slice(0, 20000) };
   }
@@ -3121,7 +3143,6 @@ async function toolDiffEdit(args) {
 
 
 // GitHub REST API helper — uses GH_TOKEN env var, no gh CLI needed.
-const GITHUB_REPO = 'adrianenc11-hue/kelionai-v2';
 const PROTECTED_PR_BRANCHES = new Set(['master', 'main']);
 
 function _githubToken() {
@@ -3142,7 +3163,7 @@ function _isSafePrBranch(branch) {
 async function _ghApi(path, method = 'GET', body = null) {
   const token = _githubToken();
   if (!token) throw new Error('GITHUB_TOKEN, AGENT_GITHUB_TOKEN, or GH_TOKEN env var not set');
-  const res = await fetch(`https://api.github.com/repos/${GITHUB_REPO}${path}`, {
+  const res = await fetch(`https://api.github.com/repos/${configuredRepoSlug()}${path}`, {
     method,
     headers: {
       Authorization: `Bearer ${token}`,
