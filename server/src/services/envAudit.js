@@ -127,14 +127,19 @@ async function checkAgentShellCwd() {
   const resolved = raw ? path.resolve(raw) : process.cwd();
   const exists = fs.existsSync(resolved);
   const hasPackage = exists && fs.existsSync(path.join(resolved, 'package.json'));
+  const hasGit = exists && fs.existsSync(path.join(resolved, '.git'));
   return {
     name: 'AGENT_SHELL_CWD',
-    ok: !!raw && exists && hasPackage,
+    ok: !!raw && exists && hasPackage && hasGit,
     requiredForAutonomy: true,
     value: raw ? resolved : 'not set',
     error: !raw
       ? 'Must be set explicitly to the repo root before AGENT_ENABLED=1'
-      : (!exists ? 'Path does not exist' : (!hasPackage ? 'Path does not look like the repo root' : null)),
+      : (!exists
+        ? 'Path does not exist'
+        : (!hasPackage
+          ? 'Path does not look like the repo root (package.json missing)'
+          : (!hasGit ? 'Path is not a git repository root (.git missing)' : null))),
   };
 }
 

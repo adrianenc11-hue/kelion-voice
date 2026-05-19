@@ -3,12 +3,15 @@
 const fs = require('fs').promises;
 const path = require('path');
 
-const ALLOWED_ROOT = process.env.AGENT_FS_ROOT || process.cwd();
+function getAllowedRoot() {
+  return process.env.AGENT_FS_ROOT || process.env.AGENT_SHELL_CWD || process.cwd();
+}
 
 function normalizePath(input) {
   if (!input || typeof input !== 'string') return null;
-  const target = path.resolve(ALLOWED_ROOT, input);
-  if (!target.startsWith(path.resolve(ALLOWED_ROOT))) return null;
+  const allowedRoot = path.resolve(getAllowedRoot());
+  const target = path.resolve(allowedRoot, input);
+  if (!target.startsWith(allowedRoot)) return null;
   return target;
 }
 
@@ -53,4 +56,4 @@ async function listDir(dirPath) {
   }
 }
 
-module.exports = { readFile, writeFile, listDir };
+module.exports = { readFile, writeFile, listDir, getAllowedRoot };
