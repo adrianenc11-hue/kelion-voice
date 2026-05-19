@@ -2467,10 +2467,17 @@ async function toolCommitAndPushToGithub(args) {
 
   const msg = args.commit_message || 'Update from Kelion';
   const branch = args.branch || `kelion/auto-${Date.now()}`;
+  const safeBranch = String(branch || '').trim();
+  if (!_isSafePrBranch(safeBranch)) {
+    return { ok: false, error: 'Push requires a non-master feature branch. Direct push to master/main is blocked.' };
+  }
 
   try {
     const { execSync } = require('child_process');
     const rootDir = REPO_ROOT;
+    agentRepo.configureRemote(rootDir);
+    execSync('git fetch origin master --prune', { cwd: rootDir, stdio: 'pipe' });
+    execSync(`git checkout -B ${gitQuote(safeBranch)} origin/master`, { cwd: rootDir, stdio: 'pipe' });
 
     // Config git user if missing
     try { execSync('git config user.name', { cwd: rootDir }); } catch {
@@ -2478,25 +2485,18 @@ async function toolCommitAndPushToGithub(args) {
       execSync('git config user.email "kelion@kelionai.app"', { cwd: rootDir });
     }
 
-    // Set remote URL with token securely
-    agentRepo.configureRemote(rootDir);
-
     execSync('git add .', { cwd: rootDir });
 
     // Check if there are changes to commit
     const status = execSync('git status --porcelain', { cwd: rootDir }).toString().trim();
     if (!status) {
-      return { ok: true, skipped: true, result: "No changes to commit." };
-    }
-
-    const safeBranch = String(branch || '').trim();
-    if (!_isSafePrBranch(safeBranch)) {
-      return { ok: false, error: 'Push requires a non-master feature branch. Direct push to master/main is blocked.' };
+      return { ok: false, executed: true, skipped: true, error: 'No changes to commit. No branch was pushed and no PR should be claimed.' };
     }
     execSync(`git commit -m ${gitQuote(msg)}`, { cwd: rootDir });
     execSync(`git push -u origin ${gitQuote(safeBranch)}:${gitQuote(safeBranch)}`, { cwd: rootDir });
 
-    return { ok: true, result: `Successfully committed with message '${msg}' and pushed to ${safeBranch}.` };
+    const commit = execSync('git rev-parse HEAD', { cwd: rootDir }).toString().trim();
+    return { ok: true, executed: true, pushed: true, branch: safeBranch, commit, result: `Committed and pushed ${safeBranch}.` };
   } catch (err) {
     return { ok: false, error: agentRepo.redact(err.message), stderr: err.stderr ? agentRepo.redact(err.stderr.toString()) : null };
   }
@@ -2737,6 +2737,7 @@ const _cp = require('child_process');
 const _util = require('util');
 const _exec = _util.promisify(_cp.exec);
 const agentRepo = require('./agentRepo');
+const agentGitHub = require('./agentGitHub');
 
 // Path to the repository root
 const _repoInfo = agentRepo.ensureAgentRepoSync();
@@ -3227,25 +3228,17 @@ async function toolCreateGithubPr(args) {
       }
     }
 
-    let pr;
-    try {
-      pr = await _ghApi('/pulls', 'POST', {
-        title,
-        head: branch,
-        base: 'master',
-        body,
-      });
-    } catch (err) {
-      if (err.status === 422) {
-        const prs = await _ghApi(`/pulls?state=open&head=${encodeURIComponent(`${configuredRepoSlug().split('/')[0]}:${branch}`)}`);
-        if (Array.isArray(prs) && prs.length) {
-          return { ok: true, url: prs[0].html_url, pr_number: prs[0].number, existing: true };
-        }
-      }
-      throw err;
-    }
-
-    return { ok: true, url: pr.html_url, pr_number: pr.number };
+    const pr = await agentGitHub.createPr(branch, title, body, 'master');
+    if (!pr.ok) return { ok: false, error: agentRepo.redact(pr.error || 'GitHub PR creation failed') };
+    return {
+      ok: true,
+      url: pr.data?.html_url || pr.data?.url || null,
+      pr_number: pr.data?.number || null,
+      existing: !!pr.existing,
+      merged: !!pr.merged,
+      closed: !!pr.closed,
+      noDiff: !!pr.noDiff,
+    };
   } catch (err) {
     return { ok: false, error: agentRepo.redact(err.message) };
   }
