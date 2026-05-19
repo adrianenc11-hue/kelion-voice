@@ -42,6 +42,7 @@ const agentBrowser = require('./agentBrowser');
 const agentSandbox = require('./agentSandbox');
 const agentDeploy = require('./agentDeploy');
 const PROTECTED_BRANCHES = new Set(['master', 'main', 'origin/master', 'origin/main', 'HEAD']);
+const lifecycle = require('./agentLifecycle');
 
 function isSafePrBranch(branch) {
   const name = String(branch || '').trim();
@@ -184,6 +185,28 @@ async function _saveState(taskId, state) {
       backups: state.backups,
       approved_commit: state.approvedCommit || false,
       approved_push: state.approvedPush || false,
+      lifecycle_stage: state.lifecycleStage || state.status,
+      completion_contract: state.completionContract || {},
+      verification_report: state.verificationReport || lifecycle.buildVerificationReport(state),
+      failure_classification: state.failureClassification || null,
+      attempt_count: state.repairCount || 0,
+      last_error_code: state.lastErrorCode || null,
+      blocked_on: state.blockedOn || null,
+      pr_url: state.prUrl || null,
+    });
+    await brainBus.emit({
+      source: 'agent_orchestrator',
+      kind: 'state_saved',
+      summary: `Task ${taskId} status=${state.status}${state.prUrl ? ` PR=${state.prUrl}` : ''}`,
+      taskId,
+      ok: state.status !== 'failed' && state.status !== 'blocked',
+      payload: {
+        status: state.status,
+        lifecycleStage: state.lifecycleStage || null,
+        completionContract: state.completionContract || {},
+        modifiedPaths: Array.from(state.modifiedPaths || []),
+        prUrl: state.prUrl || null,
+      },
     });
     await brainBus.emit({
       source: 'agent_orchestrator',
@@ -324,6 +347,15 @@ Every step may include an optional "content" field used as TTS narrative.` },
  * @returns {Promise<{ok:boolean, blocked?:boolean, pendingApproval?:boolean, error?:string}>}
  */
 async function _executeStep(taskId, step, state) {
+  const stage = lifecycle.stepStage(step.type);
+  if (stage) {
+    state.lifecycleStage = stage;
+    if (stage === lifecycle.STAGES.UNDERSTOOD) {
+      state.completionContract = lifecycle.updateContractForStep(state.completionContract, step, { ok: true }, state);
+    }
+    await _saveState(taskId, state);
+  }
+
   const log = (type, detail) => {
     const entry = { ts: new Date().toISOString(), stepId: step.id, type, detail };
     state.logs.push(entry);
@@ -527,6 +559,17 @@ async function _executeStep(taskId, step, state) {
     r = { ok: false, error: err.message };
   }
 
+  if (r.ok) {
+    state.completionContract = lifecycle.updateContractForStep(state.completionContract, step, r, state);
+    if (step.type === 'validate' || step.type === 'test' || step.type === 'build' || step.type === 'lint') {
+      state.verificationReport = lifecycle.buildVerificationReport(state);
+    }
+  } else {
+    state.failureClassification = lifecycle.classifyFailure(step, r);
+    state.lastErrorCode = state.failureClassification;
+    state.blockedOn = `${step.type}:${step.id}`;
+  }
+
   // Keep internal work silent by default; expose only blockers/errors.
   const narrative = _narrateStep(step, r);
   _pushNarrative(state, { stepId: step.id, type: step.type, narrative }, {
@@ -654,6 +697,12 @@ async function _startTaskLocked(description, options = {}) {
     autonomyStatus,
     prBranch: makeTaskBranch(description, taskId),
     status: 'planning',
+    lifecycleStage: lifecycle.STAGES.RECEIVED,
+    completionContract: lifecycle.createContract(),
+    verificationReport: {},
+    failureClassification: null,
+    lastErrorCode: null,
+    blockedOn: null,
     repairCount: 0,
   };
 
@@ -665,8 +714,10 @@ async function _startTaskLocked(description, options = {}) {
   const plan = normalizePlanForPrWorkflow(rawPlan, state.prBranch);
   state.plan = plan;
   state.status = 'executing';
+  state.lifecycleStage = lifecycle.STAGES.UNDERSTOOD;
+  state.completionContract.understood = true;
   state.statusDetail = `Plan: ${plan.steps.length} pași`;
-  await updateTask(taskId, { status: 'in_progress', status_detail: state.statusDetail });
+  await _saveState(taskId, state);
 
   // 2. Execute steps
   for (const step of plan.steps.slice(0, MAX_STEPS)) {
@@ -674,17 +725,23 @@ async function _startTaskLocked(description, options = {}) {
 
     if (result.blocked) {
       state.status = 'blocked';
+      state.lifecycleStage = lifecycle.STAGES.BLOCKED;
+      state.failureClassification = lifecycle.classifyFailure(step, result);
+      state.lastErrorCode = state.failureClassification;
+      state.blockedOn = `${step.type}:${step.id}`;
       _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: 'Am oprit execuția – acțiunea este blocată de regulile de siguranță.' }, { always: true });
       state.statusDetail = `Blocat la pasul ${step.id}: ${step.type}`;
-      await updateTask(taskId, { status: 'blocked', status_detail: state.statusDetail });
+      await _saveState(taskId, state);
       break;
     }
 
     if (result.pendingApproval) {
       state.status = 'pending_approval';
+      state.lifecycleStage = lifecycle.stepStage(step.type) || state.lifecycleStage;
+      state.blockedOn = `${step.type}:${step.id}`;
       _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: 'Am terminat modificările. Aștept aprobarea ta pentru commit și push.' }, { always: true });
       state.statusDetail = `Aștept aprobare la pasul ${step.id}: ${step.type}`;
-      await updateTask(taskId, { status: 'pending_approval', status_detail: state.statusDetail });
+      await _saveState(taskId, state);
       break;
     }
 
@@ -693,8 +750,10 @@ async function _startTaskLocked(description, options = {}) {
       _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: `Validarea ${step.type} a eșuat. Încep repararea automată – încercarea ${state.repairCount + 1}.` });
 
       const repair = await _autoRepair(taskId, step, state, state.repairCount + 1);
+      state.completionContract.repairedIfNeeded = Boolean(repair.repaired);
       if (repair.repaired) {
         state.repairCount++;
+        state.lifecycleStage = lifecycle.STAGES.REPAIRING;
         // Re-run the SAME step after repair
         const retry = await _executeStep(taskId, { ...step, iteration: state.repairCount }, state);
         if (retry.ok) {
@@ -705,34 +764,58 @@ async function _startTaskLocked(description, options = {}) {
 
       // Repair failed or exhausted
       state.status = 'needs_review';
+      state.lifecycleStage = lifecycle.STAGES.NEEDS_REVIEW;
+      state.failureClassification = lifecycle.classifyFailure(step, result);
+      state.lastErrorCode = state.failureClassification;
+      state.blockedOn = `${step.type}:${step.id}`;
       _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: `Nu am reușit să repar automat după ${state.repairCount} încercări. Te rog să verifici și să aprobi manual.` }, { always: true });
       state.statusDetail = `Reparare eșuată la pasul ${step.id}: ${step.type}`;
-      await updateTask(taskId, { status: 'needs_review', status_detail: state.statusDetail });
+      await _saveState(taskId, state);
       break;
     }
 
     // Non-validation step failed → fail fast
     if (!result.ok) {
       state.status = 'failed';
+      state.lifecycleStage = lifecycle.STAGES.FAILED;
+      state.failureClassification = lifecycle.classifyFailure(step, result);
+      state.lastErrorCode = state.failureClassification;
+      state.blockedOn = `${step.type}:${step.id}`;
       _pushNarrative(state, { stepId: step.id, type: 'speak', narrative: `Eroare la pasul ${step.type}. Oprire rapidă pentru siguranță.` }, { always: true });
       state.statusDetail = `Eșec la pasul ${step.id}: ${step.type}`;
-      await updateTask(taskId, { status: 'failed', status_detail: state.statusDetail });
+      await _saveState(taskId, state);
       break;
     }
   }
 
   if (state.status === 'executing' && state.modifiedPaths?.size && plan.steps.some(s => s.type === 'commit' || s.type === 'push' || s.type === 'pr') && !state.prUrl) {
     state.status = 'blocked';
+    state.lifecycleStage = lifecycle.STAGES.BLOCKED;
+    state.failureClassification = 'missing_pull_request';
+    state.lastErrorCode = 'missing_pull_request';
+    state.blockedOn = 'pr';
     state.statusDetail = 'Blocked: code changed, but no pull request URL exists.';
     _pushNarrative(state, { stepId: 999, type: 'speak', narrative: 'Nu declar task-ul finalizat: exista modificari, dar nu exista pull request catre master.' }, { always: true });
-    await updateTask(taskId, { status: 'blocked', status_detail: state.statusDetail });
+    await _saveState(taskId, state);
   }
 
   if (state.status === 'executing') {
-    state.status = 'done';
-    _pushNarrative(state, { stepId: 999, type: 'speak', narrative: 'Task finalizat cu succes. Toate validările au trecut.' }, { always: true });
-    state.statusDetail = `Complet – ${plan.steps.length} pași`;
-    await updateTask(taskId, { status: 'done', status_detail: state.statusDetail });
+    const gate = lifecycle.evaluateCompletion(state, plan);
+    state.completionContract = gate.contract || state.completionContract;
+    state.status = gate.status;
+    state.lifecycleStage = gate.lifecycleStage || (gate.ok ? lifecycle.STAGES.VERIFIED : lifecycle.STAGES.BLOCKED);
+    state.statusDetail = gate.reason;
+    if (!gate.ok) {
+      state.failureClassification = state.failureClassification || 'completion_contract_failed';
+      state.lastErrorCode = state.lastErrorCode || 'completion_contract_failed';
+      state.blockedOn = state.blockedOn || 'completion_contract';
+    }
+    _pushNarrative(state, {
+      stepId: 999,
+      type: 'speak',
+      narrative: gate.ok ? gate.reason : `Nu declar task-ul finalizat: ${gate.reason}`,
+    }, { always: true });
+    await _saveState(taskId, state);
   }
 
   // ── Autonomy Loop: assess completion, re-plan if needed ──
@@ -823,6 +906,13 @@ async function approveTask(taskId, { commit = false, push = false } = {}) {
     approvedCommit:   commit,
     approvedPush:     push,
     status:           task.status,
+    lifecycleStage:   task.lifecycle_stage || task.lifecycleStage || lifecycle.STAGES.RECEIVED,
+    completionContract: task.completion_contract || task.completionContract || lifecycle.createContract(),
+    verificationReport: task.verification_report || task.verificationReport || {},
+    failureClassification: task.failure_classification || task.failureClassification || null,
+    lastErrorCode:    task.last_error_code || task.lastErrorCode || null,
+    blockedOn:        task.blocked_on || task.blockedOn || null,
+    prUrl:            task.pr_url || task.prUrl || null,
     repairCount:      0,
     plan:             task.plan,
     statusDetail:     task.status_detail || task.status,
@@ -865,10 +955,13 @@ async function approveTask(taskId, { commit = false, push = false } = {}) {
     }
   }
 
-  state.status = 'done';
+  const gate = lifecycle.evaluateCompletion(state, state.plan);
+  state.completionContract = gate.contract || state.completionContract;
+  state.status = state.prUrl ? 'pending_approval' : gate.status;
+  state.lifecycleStage = state.prUrl ? lifecycle.STAGES.WAITING_HUMAN_MERGE : (gate.lifecycleStage || lifecycle.STAGES.VERIFIED);
   state.statusDetail = state.prUrl
-    ? `Complete - PR created: ${state.prUrl}`
-    : 'Complete - approved';
+    ? `PR created, waiting human merge: ${state.prUrl}`
+    : gate.reason || 'Complete - approved';
   _pushNarrative(state, {
     stepId: 999,
     type: 'speak',
@@ -952,7 +1045,11 @@ If complete is false, nextSteps should describe what remains to be done.` },
     return JSON.parse(payload);
   } catch (e) {
     console.error('[agentOrchestrator] _assessCompletion error:', e.message);
-    return { complete: true, reason: 'Assessment failed — assuming complete.' };
+    return {
+      complete: false,
+      reason: 'Assessment failed - cannot prove completion.',
+      nextSteps: 'Re-run deterministic validation and require a PR/report before completion.',
+    };
   }
 }
 
