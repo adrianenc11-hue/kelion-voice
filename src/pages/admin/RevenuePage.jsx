@@ -61,6 +61,8 @@ export default function RevenuePage() {
   const biz = business?.ledger || {}
   const revenue = (biz.revenueCents || 0) / 100
   const allocPct = split?.fraction || 0.5
+  const reserve = split?.reserve || null
+  const profitDisplay = reserve?.protectedOwnerDisplay || split?.allocation?.ownerDisplay || `GBP ${(revenue * (1 - allocPct)).toFixed(2)}`
   const normalizeLedgerRow = (row) => ({
     ...row,
     email: row.email || row.userEmail || row.user_email || null,
@@ -131,8 +133,21 @@ export default function RevenuePage() {
         <div className="kpi-grid">
           <KpiCard icon="💰" label="Venit brut (30z)" value={`£${revenue.toFixed(2)}`} accent="#10b981" sub={`${biz.topups || 0} top-ups`} />
           <KpiCard icon="🧠" label="Alocare AI" value={`£${(revenue * allocPct).toFixed(2)}`} accent="#f472b6" sub={`${Math.round(allocPct * 100)}% din brut`} />
-          <KpiCard icon="💸" label="Profit net" value={`£${(revenue * (1 - allocPct)).toFixed(2)}`} accent="#a78bfa" sub="după deducere AI" />
+          <KpiCard icon="$" label="Profit accesibil" value={profitDisplay} accent="#a78bfa" sub={reserve?.ok ? 'tampon AI acoperit' : 'blocat de tampon AI'} />
           <KpiCard icon="⏱️" label="Min vândute / consumate" value={`${biz.minutesSold || 0} / ${biz.minutesConsumed || 0}`} accent="#60a5fa" />
+        </div>
+      )}
+
+      {reserve && (
+        <div className="admin-card" style={{
+          borderColor: reserve.ok ? 'rgba(16,185,129,.35)' : 'rgba(248,113,113,.45)',
+          background: reserve.ok ? 'rgba(16,185,129,.06)' : 'rgba(248,113,113,.08)',
+        }}>
+          <div className="admin-card-title" style={{ marginBottom: 8 }}>Rezerva AI - OpenRouter</div>
+          <div style={{ fontSize: 13, color: 'var(--admin-text-dim)' }}>
+            Minim tampon: ${Number(reserve.minOpenRouterBufferUsd || 0).toFixed(2)} - disponibil: {reserve.openrouterAvailableUsd == null ? 'neverificat' : `$${Number(reserve.openrouterAvailableUsd).toFixed(2)}`} - deficit: ${Number(reserve.openrouterDeficitUsd || 0).toFixed(2)}
+          </div>
+          <div style={{ marginTop: 8, fontSize: 13, fontWeight: 600 }}>{reserve.message}</div>
         </div>
       )}
 

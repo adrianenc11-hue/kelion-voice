@@ -366,8 +366,31 @@ router.post('/payouts/instant', async (req, res) => {
   try {
     const { amountCents, currency, description } = req.body || {};
     const parsedAmount = Number(amountCents);
+    const days = 30;
+    const [snapshot, summary] = await Promise.all([
+      payoutsService.getPayoutSnapshot(),
+      getCreditRevenueSummary(days),
+    ]);
+    const split = await buildRevenueSplit(summary, { days });
+    const reserveDeficit = Number(split?.reserve?.reserveDeficitCents || 0);
+    const instantAvailable = Number(snapshot?.balance?.instantAvailable?.amount || 0);
+    if (reserveDeficit > 0) {
+      return res.status(409).json({
+        error: split.reserve.message || 'AI reserve is not covered. Refill OpenRouter before payout.',
+        reserve: split.reserve,
+        instantAvailable,
+      });
+    }
+    const requested = Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : undefined;
+    if (requested && requested > Number(split?.reserve?.protectedOwnerCents || 0)) {
+      return res.status(409).json({
+        error: 'Requested payout exceeds profit available after AI reserve.',
+        reserve: split.reserve,
+        protectedOwnerCents: split.reserve.protectedOwnerCents,
+      });
+    }
     const out = await payoutsService.triggerInstantPayout({
-      amountCents: Number.isFinite(parsedAmount) && parsedAmount > 0 ? parsedAmount : undefined,
+      amountCents: requested,
       currency: typeof currency === 'string' ? currency : undefined,
       description: typeof description === 'string' ? description : undefined,
     });
@@ -1092,9 +1115,10 @@ router.get('/live-sessions', async (_req, res) => {
 });
 
 // ─── Provider Balance Watchdog ──────────────────────────────
-// Every 30 minutes, checks AI provider balances. If any drop
-// below $5, pushes an alert to all admin push subscriptions.
-const LOW_BALANCE_THRESHOLD_USD = 5;
+// Every 30 minutes, checks AI provider balances. If any drop below the
+// protected AI buffer, alert admin. Push can have zero subscribers, so
+// email is also sent as fallback.
+const LOW_BALANCE_THRESHOLD_USD = Number(process.env.AI_MIN_OPENROUTER_BUFFER_USD || 10);
 const WATCHDOG_INTERVAL_MS = 30 * 60 * 1000; // 30 min
 
 let _lastAlertMap = {}; // provider → timestamp of last alert
@@ -1113,11 +1137,18 @@ async function checkProviderBalances() {
       if (bal < LOW_BALANCE_THRESHOLD_USD && Date.now() - lastAlert > 60 * 60 * 1000) {
         _lastAlertMap[card.id] = Date.now();
         console.warn(`[watchdog] Low balance: ${card.name || card.id} = $${bal.toFixed(2)}`);
-        await sendAdminAlert({
-          title: `⚠️ Low credit: ${card.name || card.id}`,
-          body: `Balance: $${bal.toFixed(2)} (threshold: $${LOW_BALANCE_THRESHOLD_USD}). Top up now.`,
-          url: card.topUpUrl || '/',
-        });
+        const title = `Low credit: ${card.name || card.id}`;
+        const body = `Balance: $${bal.toFixed(2)} (protected buffer: $${LOW_BALANCE_THRESHOLD_USD}). Top up before profit payout.`;
+        await sendAdminAlert({ title, body, url: card.topUpUrl || '/' });
+        sendEmailAlert({
+          subject: `[Kelion] ${title}`,
+          text: [
+            body,
+            `Provider: ${card.name || card.id}`,
+            `Top up: ${card.topUpUrl || 'https://openrouter.ai/settings/credits'}`,
+            'Profit payout is blocked until the AI reserve is covered.',
+          ].join('\n'),
+        }).catch((err) => console.warn('[watchdog] low-balance email failed:', err && err.message));
       }
     }
   } catch (err) {
