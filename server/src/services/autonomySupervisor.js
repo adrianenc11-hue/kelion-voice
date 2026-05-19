@@ -3,7 +3,7 @@
 const { runEnvAudit } = require('./envAudit');
 
 const CAPABILITY_NAMES = {
-  models: ['OpenRouter API Key', 'Google AI Studio Keys'],
+  models: ['OpenRouter API Key'],
   git: ['GitHub Token', 'Master Branch Protection'],
   shell: ['AGENT_ENABLED', 'AGENT_SHELL_CWD'],
   persistence: ['DATABASE_URL (Postgres)', 'Secrets'],
@@ -12,7 +12,6 @@ const CAPABILITY_NAMES = {
 
 const ACTIONS = {
   'OpenRouter API Key': 'Set OPENROUTER_API_KEY.',
-  'Google AI Studio Keys': 'Set GOOGLE_API_KEY or GOOGLE_API_KEYS.',
   'GitHub Token': 'Set GITHUB_TOKEN, AGENT_GITHUB_TOKEN, or GH_TOKEN with repo access.',
   'Google Search (Agent)': 'Set AGENT_GOOGLE_API_KEY and AGENT_GOOGLE_CX for independent web research.',
   AGENT_ENABLED: 'Set AGENT_ENABLED=1.',

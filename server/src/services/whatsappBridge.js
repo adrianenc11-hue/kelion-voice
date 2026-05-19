@@ -216,6 +216,10 @@ class WhatsAppBridge extends EventEmitter {
         const media = await msg.downloadMedia();
         if (media && media.data) {
           inputAudioMedia = media;
+          if (process.env.KELION_ALLOW_GEMINI_STT !== '1') {
+            console.warn('[WhatsApp] Audio transcription disabled: Gemini STT is not allowed for Kelion.');
+            return;
+          }
           const { transcribeAudioPtt } = require('./geminiAudioTranscriber');
           const transcription = await transcribeAudioPtt(media.data, media.mimetype);
           if (transcription) {

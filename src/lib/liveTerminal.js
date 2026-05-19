@@ -21,7 +21,7 @@ export function buildTerminalHtml(toolName, cmdOrInfo) {
   return `<div id="term" style="padding:16px 20px;font-family:'Consolas','Fira Code',monospace;background:#0d1117;color:#e6edf3;min-height:100%;box-sizing:border-box;font-size:13px;line-height:1.6;overflow-y:auto;">
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;padding-bottom:8px;border-bottom:1px solid #21262d;">
     <div id="spinner" style="width:10px;height:10px;border-radius:50%;border:2px solid #58a6ff;border-top-color:transparent;animation:spin .8s linear infinite;"></div>
-    <span style="color:#58a6ff;font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">${ESC(toolName)}</span>
+    <span style="color:#58a6ff;font-size:12px;text-transform:uppercase;letter-spacing:1px;font-weight:600;">Terminal</span>
     <span id="elapsed" style="color:#484f58;font-size:11px;margin-left:auto;">0.0s</span>
   </div>
   <div style="color:#7d8590;font-size:12px;margin-bottom:8px;">$ ${ESC(cmdOrInfo)}</div>
@@ -89,7 +89,7 @@ export function showTerminal(toolName, cmdOrInfo) {
   handleShowOnMonitor({
     kind: 'html',
     query: buildTerminalHtml(toolName, cmdOrInfo),
-    title: `⚡ ${toolName}`,
+    title: 'Terminal',
   })
 }
 

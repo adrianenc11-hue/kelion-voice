@@ -69,22 +69,13 @@ async function checkGithubToken() {
 }
 
 async function checkGoogleAiStudio() {
-  const keys = (process.env.GOOGLE_API_KEYS || process.env.GOOGLE_API_KEY || '')
-    .split(',')
-    .map(k => k.trim())
-    .filter(Boolean);
-  if (!keys.length) {
-    return { name: 'Google AI Studio Keys', ok: false, requiredForAutonomy: true, error: 'Not set (GOOGLE_API_KEY or GOOGLE_API_KEYS)' };
-  }
-  const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(keys[0])}`;
-  const r = await fetchJson(url);
   return {
     name: 'Google AI Studio Keys',
-    ok: r.ok,
-    requiredForAutonomy: true,
-    status: r.status,
-    value: `${keys.length} key(s) configured`,
-    error: r.ok ? null : 'Invalid Google AI key or quota/API access problem',
+    ok: true,
+    requiredForAutonomy: false,
+    skipped: true,
+    note: 'Disabled: Kelion brain is Claude/OpenRouter only',
+    error: null,
   };
 }
 
@@ -201,7 +192,6 @@ async function checkSessionSecrets() {
 async function runEnvAudit() {
   const results = await Promise.all([
     checkOpenRouter(),
-    checkGoogleAiStudio(),
     checkElevenLabs(),
     checkStripe(),
     checkStripeWebhook(),

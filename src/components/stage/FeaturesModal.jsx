@@ -19,7 +19,7 @@ export default function FeaturesModal({ onClose, isAdmin }) {
 
   const userFeatures = [
     'Real-time voice chat with a 3D avatar (lip-sync, facial emotions, camera awareness).',
-    'Multi-model AI brain — Claude, Gemini, Llama via OpenRouter with automatic fallback if one provider fails.',
+    'Claude/OpenRouter AI brain with controlled fallback across approved Claude-compatible models.',
     'Live web search, weather forecasts, interactive maps, turn-by-turn navigation, and news.',
     'AI image generation from text prompts.',
     'Device control: GPS location, front/back camera switch, zoom, and screen awareness.',

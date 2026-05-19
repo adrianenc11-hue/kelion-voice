@@ -93,6 +93,21 @@ function readVoiceStyleCookie() {
   return m ? decodeURIComponent(m[1]) : 'warm'
 }
 
+function providerDisplayName(card) {
+  if (!card) return 'Provider necunoscut'
+  const known = {
+    openrouter: 'OpenRouter',
+    elevenlabs: 'ElevenLabs',
+    stripe: 'Stripe',
+    railway: 'Railway',
+    google: 'Google AI Studio',
+    googleai: 'Google AI Studio',
+    supabase: 'Supabase',
+  }
+  const id = String(card.id || card.provider || '').toLowerCase()
+  return card.providerLabel || card.name || known[id] || card.provider || card.id || 'Provider necunoscut'
+}
+
 function actionBtnStyle(disabled, color, borderColor) {
   return {
     padding: '7px 12px', borderRadius: 8,
@@ -1911,8 +1926,8 @@ export default function KelionStage() {
                           )}
                           <span>
                             {status === 'listening' && 'Recepție...'}
-                            {status === 'thinking' && (taskStatus ? `🧠 ${taskStatus.label}` : 'Gândește...')}
-                            {status === 'working' && (taskStatus ? `⚙️ ${taskStatus.tool.replace(/_/g,' ')}` : 'Aplică unelte...')}
+                            {status === 'thinking' && (taskStatus ? (taskStatus.label || 'Kelion lucreaza...') : 'Gandeste...')}
+                            {status === 'working' && (taskStatus ? (taskStatus.label || 'Kelion lucreaza...') : 'Aplica unelte...')}
                             {status === 'speaking' && 'Răspunde...'}
                             {status === 'idle' && 'Inactiv'}
                             {status === 'error' && 'Eroare'}
@@ -3742,7 +3757,7 @@ export default function KelionStage() {
                   display: 'flex', alignItems: 'center', justifyContent: 'space-between',
                   marginBottom: 6,
                 }}>
-                  <div style={{ fontSize: 15, fontWeight: 600 }}>{c.name}</div>
+                  <div style={{ fontSize: 15, fontWeight: 600 }}>{providerDisplayName(c)}</div>
                   <span style={{
                     fontSize: 10, letterSpacing: '0.1em', fontWeight: 600,
                     padding: '3px 8px', borderRadius: 999,

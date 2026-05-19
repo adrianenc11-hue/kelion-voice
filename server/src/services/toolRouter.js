@@ -458,15 +458,6 @@ function detectCategories(message) {
   const lower = message.toLowerCase().trim();
   const matched = new Set();
 
-  // ── Greeting Detection ──────────────────────────────────────────
-  // Greetings like "bună", "salut", "hello" should activate weather
-  // and location tools so Kelion can respond proactively with context
-  // (e.g. "Bună seara. 22°C, parțial noros.") instead of a generic reply.
-  const GREETING_RX = /^\s*(bun[aă]|salut|hello|hi|hey|good\s*(morning|evening|afternoon|night)|ce\s*faci|cum\s*e|noapte\s*bun[aă]|servus|ziua\s*bun[aă]|bun[aă]\s*(diminea[tț]a|seara|ziua))\s*[.!?]*$/i;
-  if (GREETING_RX.test(lower)) {
-    matched.add('GEO_WEATHER');
-  }
-
   for (const [category, triggers] of Object.entries(CATEGORY_TRIGGERS)) {
     // Check patterns (regex)
     const hasPatternMatch = triggers.patterns.some(p => p.test(lower));
@@ -487,8 +478,7 @@ function detectCategories(message) {
 
 /**
  * Given a user message and the full tool catalog, return only the relevant
- * tools. CORE tools are always included. If no categories match (simple
- * greeting/chat), only CORE tools are returned.
+ * tools. If no categories match (simple greeting/chat), no tools are returned.
  *
  * @param {string} message - The user's message
  * @param {Array} allTools - Full KELION_TOOLS array from realtime.js
@@ -500,9 +490,12 @@ function selectTools(message, allTools) {
   // Build the set of tool names to include
   const selectedNames = new Set();
 
-  // Always include CORE
-  for (const name of TOOL_CATEGORIES.CORE) {
-    selectedNames.add(name);
+  // Include CORE only when a real tool category matched. This prevents
+  // simple chat from exposing monitor, shell, memory, or database tools.
+  if (categories.size > 0) {
+    for (const name of TOOL_CATEGORIES.CORE) {
+      selectedNames.add(name);
+    }
   }
 
   // Add tools from matched categories
@@ -515,21 +508,21 @@ function selectTools(message, allTools) {
     }
   }
 
-  // ── AUTO-INDEX: catch-all for tools not in any category ────────────
-  // Adrian 2026-05-18: "creiaza-i adaugare si indexare automata a tuturor
-  // toolurilor pe care le va adauga ulterior"
-  // Any tool in KELION_TOOLS that is NOT listed in ANY TOOL_CATEGORIES
-  // is automatically included in every request. This guarantees 0% tool
-  // invisibility — new tools work immediately without manual categorization.
+  // AUTO-INDEX: catch-all for tools not in any category.
+  // Disabled by default. New uncategorized tools must not leak into simple
+  // chat or every request, because that causes unsolicited actions and cost.
   if (!_allCategorizedTools) {
     _allCategorizedTools = new Set();
     for (const catTools of Object.values(TOOL_CATEGORIES)) {
       for (const name of catTools) _allCategorizedTools.add(name);
     }
   }
-  for (const tool of allTools) {
-    if (!_allCategorizedTools.has(tool.name)) {
-      selectedNames.add(tool.name);
+  const includeUncategorized = process.env.KELION_AUTO_INCLUDE_UNCATEGORIZED_TOOLS === '1' && categories.size > 0;
+  if (includeUncategorized) {
+    for (const tool of allTools) {
+      if (!_allCategorizedTools.has(tool.name)) {
+        selectedNames.add(tool.name);
+      }
     }
   }
 

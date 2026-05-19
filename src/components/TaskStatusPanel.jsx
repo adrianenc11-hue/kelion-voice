@@ -109,7 +109,7 @@ export default function TaskStatusPanel() {
         }
       `}</style>
 
-      {/* Header: icon + tool name + elapsed */}
+      {/* Header: icon + generic task status + elapsed */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{ fontSize: 18 }}>{icon}</span>
@@ -120,7 +120,7 @@ export default function TaskStatusPanel() {
             letterSpacing: '0.5px',
             textTransform: 'uppercase',
           }}>
-            {status.tool.replace(/_/g, ' ')}
+            {status.label || 'Kelion lucreaza...'}
           </span>
         </div>
         <span style={{ fontSize: 11, color: '#8b8b9e', fontVariantNumeric: 'tabular-nums' }}>
