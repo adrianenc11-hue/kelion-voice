@@ -274,7 +274,7 @@ async function runRealToolRemote(name, args) {
   // Terminal commands → SSE streaming with batch fallback (liveTerminal module)
   if (terminalTools.includes(name)) {
     const j = await postJSON('/api/tools/execute', { name, args: args || {} })
-    return summarizeRealTool('run_terminal_command', j)
+    return makeToolProof('run_terminal_command', j, summarizeRealTool('run_terminal_command', j))
   }
 
   // File operations → open the workspace IDE in the monitor so the user
@@ -289,7 +289,7 @@ async function runRealToolRemote(name, args) {
       title: 'Workspace',
     })
     const j = await postJSON('/api/tools/execute', { name, args: args || {} })
-    return summarizeRealTool(name, j)
+    return makeToolProof(name, j, summarizeRealTool(name, j))
   }
 
   // Other dev tools → open the workspace IDE in the monitor.
@@ -300,13 +300,43 @@ async function runRealToolRemote(name, args) {
       title: 'Workspace',
     })
     const j = await postJSON('/api/tools/execute', { name, args: args || {} })
-    return summarizeRealTool(name, j)
+    return makeToolProof(name, j, summarizeRealTool(name, j))
   }
 
   // Non-dev tools → normal execution
   const j = await postJSON('/api/tools/execute', { name, args: args || {} })
   autoDisplayOnMonitor(name, j, args)
-  return summarizeRealTool(name, j)
+  return makeToolProof(name, j, summarizeRealTool(name, j))
+}
+
+function compactToolRaw(value, depth = 0) {
+  if (value == null) return value
+  if (depth > 2) return '[truncated]'
+  if (typeof value === 'string') return value.length > 600 ? `${value.slice(0, 600)}...` : value
+  if (typeof value !== 'object') return value
+  if (Array.isArray(value)) return value.slice(0, 8).map((v) => compactToolRaw(v, depth + 1))
+  const out = {}
+  for (const [key, val] of Object.entries(value).slice(0, 16)) {
+    if (/api[_-]?key|secret|token|password|authorization/i.test(key)) {
+      out[key] = '[redacted]'
+    } else {
+      out[key] = compactToolRaw(val, depth + 1)
+    }
+  }
+  return out
+}
+
+function makeToolProof(name, raw, summary) {
+  const text = String(summary || raw?.error || '')
+  const failed = raw?.ok === false || !!raw?.error || /\b(failed|error|not implemented|forbidden|unauthorized|cannot|can't|nu pot)\b/i.test(text)
+  return {
+    ok: !failed,
+    tool: name,
+    summary: text,
+    error: failed ? (raw?.error || text) : null,
+    executedAt: new Date().toISOString(),
+    raw: compactToolRaw(raw),
+  }
 }
 
 // Auto-display results on the monitor using REAL professional services.

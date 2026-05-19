@@ -6,7 +6,7 @@
 //   M11 (vision reasoning via multimodal frames), M12 (emotion mirror via persona).
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { correctTranscript } from './transcriptProcessor'
+import { correctTranscriptDetailed, recognitionLangFor } from './transcriptProcessor'
 import { runTool } from './kelionTools'
 import { isClonedVoiceActive, setDetectedLang, getDetectedLang, getSelectedVoice } from './voiceModeStore'
 import { setCameraController, setCurrentFacingMode } from './cameraControl'
@@ -498,9 +498,11 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
           userHasSpokenRef.current = true
           if (sc.inputTranscription.text.trim()) {
             const rawIn = sc.inputTranscription.text;
-            const correctedIn = correctTranscript(rawIn);
+            const processedIn = correctTranscriptDetailed(rawIn, { browserLang: getDetectedLang() || navigator.language || 'ro-RO' });
+            const correctedIn = processedIn.text;
             appendTurn('user', correctedIn, false, '🎤 Voice (Mic)')
-            logAiEvent('transcript_in', { text: correctedIn })
+            logAiEvent('transcript_in', { text: correctedIn, language: processedIn.language, confidence: processedIn.confidence })
+            if (processedIn.confidence >= 0.5) setDetectedLang(processedIn.language)
           }
           lastActivityAtRef.current = Date.now()
           narrationCooldownRef.current = Date.now()
@@ -897,7 +899,7 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
         window.__restRecRef = rec; // Keep a reference to stop it properly later
         rec.continuous = false;
         rec.interimResults = true; // Use interim results to animate soundbars
-        rec.lang = navigator.language || 'ro-RO';
+        rec.lang = recognitionLangFor(getDetectedLang(), navigator.language || 'ro-RO');
 
         let fakeAnimFrame = null;
         const startFakeAnim = () => {
@@ -921,7 +923,12 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
 
           const rawTranscript = ev.results[ev.results.length - 1][0].transcript;
           if (!rawTranscript) return;
-          const transcript = correctTranscript(rawTranscript);
+          const processedTranscript = correctTranscriptDetailed(rawTranscript, { browserLang: rec.lang || navigator.language || 'ro-RO' });
+          const transcript = processedTranscript.text;
+          if (processedTranscript.confidence >= 0.5) {
+            setDetectedLang(processedTranscript.language);
+            rec.lang = recognitionLangFor(processedTranscript.language, rec.lang || navigator.language || 'ro-RO');
+          }
 
           // ── Stop Word Detection ──────────────────────────────────────
           // If user says "oprește-te", "taci", "stop", "gata" etc.,

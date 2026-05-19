@@ -442,8 +442,15 @@ router.post('/', async (req, res) => {
         });
       }
 
-      // Standard text reply
-      const reply = choice?.message?.content || '';
+      // Standard text reply. Truth guard prevents false "I executed it"
+      // claims when no tool result proves execution in this turn.
+      let reply = choice?.message?.content || '';
+      const { guardReply } = require('../services/truthGuard');
+      const guarded = guardReply({ reply, toolResponses, model: activeModel });
+      reply = guarded.reply;
+      if (guarded.changed) {
+        console.warn('[truthGuard] blocked unverified action claim:', guarded.reason);
+      }
       if (reply) {
         session.history.push({ role: 'assistant', parts: [{ text: reply }] });
         try {
@@ -453,7 +460,7 @@ router.post('/', async (req, res) => {
             source: 'chat',
             kind: 'assistant_reply',
             summary: reply,
-            payload: { model: activeModel, heavy: isHeavy },
+            payload: { model: activeModel, heavy: isHeavy, truthGuard: guarded.changed ? guarded.reason : null },
           });
         } catch (_) {}
       }
@@ -482,7 +489,12 @@ router.post('/', async (req, res) => {
         }
       }
 
-      return res.json({ reply, model: activeModel, costGuardNotice });
+      return res.json({
+        reply,
+        model: activeModel,
+        costGuardNotice,
+        truthGuard: guarded.changed ? { reason: guarded.reason, evidence: guarded.evidence } : undefined,
+      });
     } catch (err) {
       console.error(`[chat] AI generation failed at step=${currentStep}:`, err && err.stack || err && err.message || err);
       if (err && err.code === 'CHAT_AI_TIMEOUT') {
