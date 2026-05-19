@@ -19,6 +19,17 @@ function providerName(card) {
   return card.providerLabel || card.name || known[id] || card.provider || card.id || 'Provider necunoscut'
 }
 
+function isOpenRouterUsageOnly(card) {
+  const id = String(card?.id || card?.provider || card?.name || '').toLowerCase()
+  const text = String(card?.balanceDisplay || card?.message || '').toLowerCase()
+  return id.includes('openrouter') && (
+    text.includes('used (no limit)') ||
+    text.includes('no limit') ||
+    text.includes('key usage') ||
+    text.includes('used')
+  ) && !text.includes('available') && !text.includes('remaining')
+}
+
 export default function DashboardPage() {
   const { getCsrfToken } = useOutletContext()
   const toast = useToast()
@@ -202,7 +213,9 @@ export default function DashboardPage() {
                   error: { dot: 'offline', badge: 'red', text: 'Eroare' },
                   unconfigured: { dot: 'offline', badge: 'purple', text: 'Neconfigurat' },
                 }
-                const st = statusMap[card.status] || statusMap.unconfigured
+                const st = isOpenRouterUsageOnly(card)
+                  ? { dot: 'warning', badge: 'amber', text: 'Sold neverificat' }
+                  : (statusMap[card.status] || statusMap.unconfigured)
                 return (
                   <div key={card.id || card.provider || providerName(card)} style={{
                     padding: '14px 16px',

@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
 import * as Sentry from '@sentry/react'
 import ErrorBoundary from './components/ErrorBoundary'
+import TaskStatusPanel from './components/TaskStatusPanel'
 import { installErrorReporter } from './lib/errorReporter'
 import { getCsrfToken } from './lib/api'
 import './index.css'
@@ -111,6 +112,13 @@ const PermanentLogo = () => (
   </div>
 );
 
+const GlobalOverlays = () => (
+  <>
+    <PermanentLogo />
+    <TaskStatusPanel />
+  </>
+)
+
 createRoot(document.getElementById('root')).render(
   <StrictMode>
     <ErrorBoundary>
@@ -150,6 +158,7 @@ createRoot(document.getElementById('root')).render(
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>
         </Suspense>
+        <GlobalOverlays />
       </BrowserRouter>
     </ErrorBoundary>
   </StrictMode>,

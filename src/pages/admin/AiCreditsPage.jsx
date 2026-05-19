@@ -5,7 +5,40 @@ import { useOutletContext } from 'react-router-dom'
 import { KpiCard, Skeleton, useToast, InputModal } from './AdminComponents'
 import { ensureCsrfToken } from '../../lib/api'
 
+function isOpenRouterUsageOnly(card) {
+  const id = String(card?.id || card?.provider || card?.name || '').toLowerCase()
+  const text = String(card?.balanceDisplay || card?.message || '').toLowerCase()
+  return id.includes('openrouter') && (
+    text.includes('used (no limit)') ||
+    text.includes('no limit') ||
+    text.includes('key usage') ||
+    text.includes('used')
+  ) && !text.includes('available') && !text.includes('remaining')
+}
+
+function balanceLabel(card) {
+  if (isOpenRouterUsageOnly(card)) return 'Consum pe cheie, nu sold'
+  if (card?.kind === 'revenue') return 'Sold'
+  return 'Sold real'
+}
+
+function autoTopupAmountLabel(autoTopup) {
+  const amount = autoTopup?.amountEur ?? autoTopup?.amount
+  if (!Number.isFinite(Number(amount))) return 'neconfigurata'
+  const currency = String(autoTopup?.currency || 'eur').toUpperCase()
+  return `${amount} ${currency}`
+}
+
+function autoTopupThresholdLabel(autoTopup) {
+  const value = Number(autoTopup?.threshold)
+  if (!Number.isFinite(value)) return 'neconfigurat'
+  return value > 1 ? `${value}%` : `${Math.round(value * 100)}%`
+}
+
 function friendlyStatus(card) {
+  if (isOpenRouterUsageOnly(card)) {
+    return { headline: 'Cheia merge; soldul real nu e verificat', tone: 'warn' }
+  }
   if (!card) return { headline: '—', tone: 'muted' }
   switch (card.status) {
     case 'ok': return { headline: 'Credit suficient ✓', tone: 'ok' }
@@ -123,7 +156,7 @@ export default function AiCreditsPage() {
           <div className="admin-card-title" style={{ marginBottom: 8 }}>⚡ Auto-Topup</div>
           <div style={{ fontSize: 13, color: 'var(--admin-text-dim)' }}>
             {autoTopup.enabled
-              ? `Activ · Prag: ${autoTopup.threshold} · Sumă: ${autoTopup.amount} · Ultimul: ${autoTopup.lastRun || '—'}`
+              ? `Activ - Prag: ${autoTopupThresholdLabel(autoTopup)} - Suma: ${autoTopupAmountLabel(autoTopup)} - Ultimul: ${autoTopup.lastRun || '-'}`
               : 'Dezactivat'
             }
           </div>
@@ -173,7 +206,7 @@ export default function AiCreditsPage() {
                       </div>
                       {card.balanceDisplay && (
                         <div style={{ fontSize: 12, color: 'var(--admin-text-dim)', marginTop: 4 }}>
-                          Sold: {card.balanceDisplay}
+                          {balanceLabel(card)}: {card.balanceDisplay}
                         </div>
                       )}
                       {card.message && (

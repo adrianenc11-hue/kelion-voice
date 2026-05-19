@@ -1924,6 +1924,13 @@ export default function KelionStage() {
                               boxShadow: `0 0 8px ${sc.color}`, animation: 'pulse 1.5s infinite'
                             }} />
                           )}
+                          {(status === 'thinking' || status === 'working') && (
+                            <span style={{
+                              display: 'inline-flex',
+                              animation: 'hourglassFlip 1.4s ease-in-out infinite',
+                              fontSize: 15,
+                            }}>⏳</span>
+                          )}
                           <span>
                             {status === 'listening' && 'Recepție...'}
                             {status === 'thinking' && (taskStatus ? (taskStatus.label || 'Kelion lucreaza...') : 'Gandeste...')}
@@ -4636,6 +4643,10 @@ export default function KelionStage() {
         @keyframes pulse {
           0%, 100% { opacity: 1; transform: scale(1); }
           50% { opacity: 0.55; transform: scale(0.85); }
+        }
+        @keyframes hourglassFlip {
+          0%, 45% { transform: rotate(0deg); }
+          55%, 100% { transform: rotate(180deg); }
         }
         html, body, #root { margin: 0; padding: 0; height: 100%; background: #05060a; overscroll-behavior: none; }
         * { box-sizing: border-box; }

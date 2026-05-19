@@ -629,7 +629,25 @@ function formatSchedule(schedule) {
 //
 // Adrian 2026-04-20: "poti schimba stilul de comunicare, la ai ex
 // credit suficient, atentie la ai .. x.. trebuie credit".
+function isOpenRouterUsageOnly(card) {
+  const id = String(card?.id || card?.provider || card?.name || '').toLowerCase();
+  const text = String(card?.balanceDisplay || card?.message || '').toLowerCase();
+  return id.includes('openrouter') && (
+    text.includes('used (no limit)') ||
+    text.includes('no limit') ||
+    text.includes('key usage') ||
+    text.includes('used')
+  ) && !text.includes('available') && !text.includes('remaining');
+}
+
 function friendlyCreditStatus(card, isAdmin) {
+  if (isOpenRouterUsageOnly(card)) {
+    return {
+      headline: 'Sold OpenRouter neverificat',
+      tone: 'warn',
+      sub: 'Valoarea afisata este consum pe cheie, nu bani disponibili pentru modele.',
+    };
+  }
   if (!card) return { headline: '—', tone: 'muted', sub: null };
   const isRevenue = card.kind === 'revenue';
   switch (card.status) {

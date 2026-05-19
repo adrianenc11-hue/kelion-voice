@@ -13,10 +13,10 @@ const PHASE_COLORS = {
 }
 
 const PHASE_ICONS = {
-  thinking: '🧠',
-  working:  '⚙️',
-  done:     '✅',
-  error:    '❌',
+  thinking: '⏳',
+  working:  '⏳',
+  done:     '✓',
+  error:    '!',
 }
 
 export default function TaskStatusPanel() {
@@ -58,7 +58,7 @@ export default function TaskStatusPanel() {
   if (!status) return null
 
   const color = PHASE_COLORS[status.phase] || PHASE_COLORS.working
-  const icon = PHASE_ICONS[status.phase] || '⚙️'
+  const icon = PHASE_ICONS[status.phase] || '⏳'
   const progress = status.progress || 0
   const isDone = status.phase === 'done'
   const isError = status.phase === 'error'
@@ -107,12 +107,20 @@ export default function TaskStatusPanel() {
           0% { background-position: 0 0; }
           100% { background-position: 40px 0; }
         }
+        @keyframes hourglassFlip {
+          0%, 45% { transform: rotate(0deg); }
+          55%, 100% { transform: rotate(180deg); }
+        }
       `}</style>
 
       {/* Header: icon + generic task status + elapsed */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>{icon}</span>
+          <span style={{
+            fontSize: 18,
+            display: 'inline-flex',
+            animation: !isDone && !isError ? 'hourglassFlip 1.4s ease-in-out infinite' : 'none',
+          }}>{icon}</span>
           <span style={{
             fontSize: 13,
             fontWeight: 700,
