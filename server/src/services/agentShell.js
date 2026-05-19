@@ -27,6 +27,9 @@ function getAllowedCwd() {
   if (!fs.existsSync(cwd)) {
     return { ok: false, error: `AGENT_SHELL_CWD does not exist: ${cwd}` };
   }
+  if (process.env.AGENT_ENABLED === '1' && !fs.existsSync(`${cwd}/.git`)) {
+    return { ok: false, error: `AGENT_SHELL_CWD is not a git repository root: ${cwd}` };
+  }
   return { ok: true, cwd };
 }
 

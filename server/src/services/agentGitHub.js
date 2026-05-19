@@ -67,7 +67,20 @@ async function createPr(branch, title, body = '', base = 'master') {
   if (!isSafePrBranch(branch)) {
     return { ok: false, error: 'PR creation requires a non-master feature branch.' };
   }
-  return githubRequest('/pulls', 'POST', { title, head: branch, base, body });
+  const result = await githubRequest('/pulls', 'POST', { title, head: branch, base, body });
+  if (!result.ok && result.status === 403) {
+    return {
+      ...result,
+      error: 'GitHub token cannot create pull requests for this repo. Set GITHUB_TOKEN/AGENT_GITHUB_TOKEN/GH_TOKEN with repo pull-request write access.',
+    };
+  }
+  if (!result.ok && result.status === 422) {
+    return {
+      ...result,
+      error: `GitHub rejected PR creation. The branch may already have an open PR or no diff against ${base}: ${result.error}`,
+    };
+  }
+  return result;
 }
 
 async function listOpenPrs() {

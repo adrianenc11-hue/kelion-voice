@@ -54,6 +54,53 @@ function isSafePrBranch(branch) {
     && /^[A-Za-z0-9._/-]+$/.test(name);
 }
 
+function makeTaskBranch(description, taskId) {
+  const slug = String(description || 'task')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 42) || 'task';
+  return `kelion/${taskId}-${slug}`;
+}
+
+function normalizePlanForPrWorkflow(plan, branch) {
+  const steps = Array.isArray(plan?.steps) ? plan.steps.slice() : [];
+  if (!isSafePrBranch(branch)) return { ...plan, steps };
+
+  const hasWork = steps.some(s => s.type === 'write' || s.type === 'shell');
+  const hasCommit = steps.some(s => s.type === 'commit');
+  const hasPush = steps.some(s => s.type === 'push');
+  const hasPr = steps.some(s => s.type === 'pr');
+
+  const normalized = steps.map(step => {
+    if (step.type === 'push' || step.type === 'pr') return { ...step, branch: step.branch || branch };
+    return step;
+  });
+
+  if (hasWork && !normalized.some(s => s.type === 'branch')) {
+    const firstWorkIndex = normalized.findIndex(s => s.type === 'write' || s.type === 'shell');
+    normalized.splice(Math.max(0, firstWorkIndex), 0, {
+      id: 'branch',
+      type: 'branch',
+      branch,
+      content: `Pregatesc branch-ul de lucru ${branch}.`,
+    });
+  }
+
+  if (hasCommit && !hasPush) normalized.push({ id: 'push', type: 'push', branch });
+  if ((hasCommit || hasPush) && !hasPr) {
+    normalized.push({
+      id: 'pr',
+      type: 'pr',
+      branch,
+      title: `Kelion agent task ${branch}`,
+      body: 'Automated Kelion Agent task. Validations must pass before merge.',
+    });
+  }
+
+  return { ...plan, steps: normalized.map((step, index) => ({ ...step, id: step.id ?? index + 1 })) };
+}
+
 // agentWeb loaded lazily to avoid circular deps if not present
 let _agentWeb;
 function _getAgentWeb() {
@@ -155,7 +202,7 @@ function _narrateStep(step, result) {
     read: 'citesc', write: 'modific', shell: 'rulez comanda',
     test: 'verific testele', build: 'compilez', lint: 'verific stilul',
     validate: 'rulez validarea exhaustivă', git_status: 'verific git-ul',
-    commit: 'salvez commit', push: 'public pe remote', pr: 'creez pull request',
+    branch: 'pregatesc branch-ul', commit: 'salvez commit', push: 'public pe remote', pr: 'creez pull request',
     think: 'analizez', repair: 'repar eroarea', speak: 'anunț',
     browse: 'navighez pe web', sandbox: 'execut cod izolat',
     deploy: 'deployez pe producție', verify_deploy: 'verific deploy-ul',
@@ -206,7 +253,7 @@ Rules:
 7. If deployment is needed, add "pr" step to create a pull request.
 
 Supported types:
-- Code: read, write, shell, test, build, lint, validate, git_status, commit, push, pr
+- Code: read, write, shell, test, build, lint, validate, git_status, branch, commit, push, pr
 - Browser: browse (with url, action: navigate|click|type|extract|links, selector?, text?, schema?)
 - Sandbox: sandbox (with code, timeout?)
 - Web: search_web (with query)
@@ -282,6 +329,18 @@ async function _executeStep(taskId, step, state) {
         log('shell', { cmd: step.command, ok: r.ok, exitCode: r.exitCode });
         break;
       }
+      case 'branch': {
+        const branch = String(step.branch || state.prBranch || '').trim();
+        if (!isSafePrBranch(branch)) {
+          r = { ok: false, error: 'Branch step requires a non-master feature branch.' };
+          log('branch', { branch, ok: false, error: r.error });
+          break;
+        }
+        r = await agentShell.execCommand(`git fetch origin master && git checkout -B ${branch} origin/master`, 60000);
+        if (r.ok) state.prBranch = branch;
+        log('branch', { branch, ok: r.ok });
+        break;
+      }
       case 'test': {
         r = await agentDiagnostics.runTests(step.filter || '');
         log('test', { filter: step.filter, ok: r.ok });
@@ -331,19 +390,19 @@ async function _executeStep(taskId, step, state) {
       }
       case 'push': {
         if (!state.approvedPush) { log('pending_approval', { reason: 'push' }); r = { ok: false, pendingApproval: true }; break; }
-        const branch = String(step.branch || '').trim();
+        const branch = String(step.branch || state.prBranch || '').trim();
         if (!isSafePrBranch(branch)) {
           r = { ok: false, error: 'Push requires an explicit non-master feature branch.' };
           log('push', { branch, ok: false, error: r.error });
           break;
         }
-        r = await agentShell.execCommand(`git push origin ${branch}`, 30000);
+        r = await agentShell.execCommand(`git push -u origin ${branch}:${branch}`, 30000);
         log('push', { branch, ok: r.ok });
         break;
       }
       case 'pr': {
         if (!state.approvedPush) { log('pending_approval', { reason: 'pr' }); r = { ok: false, pendingApproval: true }; break; }
-        const branch = String(step.branch || '').trim();
+        const branch = String(step.branch || state.prBranch || '').trim();
         if (!isSafePrBranch(branch)) {
           r = { ok: false, error: 'PR requires an explicit non-master feature branch.' };
           log('pr', { branch, ok: false, error: r.error });
@@ -545,6 +604,7 @@ async function _startTaskLocked(description, options = {}) {
     approvedCommit,
     approvedPush,
     autonomyStatus,
+    prBranch: makeTaskBranch(description, taskId),
     status: 'planning',
     repairCount: 0,
   };
@@ -553,7 +613,8 @@ async function _startTaskLocked(description, options = {}) {
   state.narratives.push({ stepId: 0, type: 'speak', narrative: `Pornesc task-ul: ${description.slice(0, 200)}. Generez planul de lucru.`, ts: new Date().toISOString() });
 
   // 1. Generate plan
-  const plan = await _generatePlan(description, codebaseSummary);
+  const rawPlan = await _generatePlan(description, codebaseSummary);
+  const plan = normalizePlanForPrWorkflow(rawPlan, state.prBranch);
   state.plan = plan;
   state.status = 'executing';
   state.statusDetail = `Plan: ${plan.steps.length} pași`;
@@ -718,6 +779,16 @@ async function approveTask(taskId, { commit = false, push = false } = {}) {
         state.status = 'failed';
         await _saveState(taskId, state);
         return { ok: false, taskId, approvedCommit: commit, approvedPush: push, narratives: state.narratives, error: 'Push failed after approval.' };
+      }
+    }
+
+    const prStep = state.plan.steps.find(s => s.type === 'pr');
+    if (prStep) {
+      const r = await _executeStep(taskId, prStep, state);
+      if (!r.ok) {
+        state.status = 'failed';
+        await _saveState(taskId, state);
+        return { ok: false, taskId, approvedCommit: commit, approvedPush: push, narratives: state.narratives, error: `PR creation failed after approval: ${r.error || 'unknown error'}` };
       }
     }
   }
