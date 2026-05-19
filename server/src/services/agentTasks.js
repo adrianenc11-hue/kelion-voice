@@ -4,7 +4,15 @@ const { getDb } = require('../db');
 
 // Columns that store JSON state (Postgres: JSONB; SQLite: TEXT-serialized).
 // Kept in one place so serialize/deserialize stay in sync.
-const JSON_FIELDS = ['narratives', 'logs', 'plan', 'modified_paths', 'backups'];
+const JSON_FIELDS = [
+  'narratives',
+  'logs',
+  'plan',
+  'modified_paths',
+  'backups',
+  'completion_contract',
+  'verification_report',
+];
 
 function _db() {
   const db = getDb();
@@ -36,6 +44,14 @@ function _hydrate(row) {
   // Camel-case alias for the UI consumer.
   if ('modified_paths' in out) out.modifiedPaths = out.modified_paths;
   if ('status_detail' in out) out.statusDetail = out.status_detail;
+  if ('lifecycle_stage' in out) out.lifecycleStage = out.lifecycle_stage;
+  if ('completion_contract' in out) out.completionContract = out.completion_contract;
+  if ('verification_report' in out) out.verificationReport = out.verification_report;
+  if ('failure_classification' in out) out.failureClassification = out.failure_classification;
+  if ('attempt_count' in out) out.attemptCount = out.attempt_count;
+  if ('last_error_code' in out) out.lastErrorCode = out.last_error_code;
+  if ('blocked_on' in out) out.blockedOn = out.blocked_on;
+  if ('pr_url' in out) out.prUrl = out.pr_url;
   return out;
 }
 
@@ -56,6 +72,9 @@ async function updateTask(id, updates) {
     'title', 'description', 'status', 'priority', 'status_detail',
     'narratives', 'logs', 'plan', 'modified_paths', 'backups',
     'approved_commit', 'approved_push',
+    'lifecycle_stage', 'completion_contract', 'verification_report',
+    'failure_classification', 'attempt_count', 'last_error_code',
+    'blocked_on', 'pr_url',
   ];
   const fields = [];
   const values = [];
@@ -141,6 +160,14 @@ async function initTasksTable() {
       backups TEXT DEFAULT '{}',
       approved_commit INTEGER DEFAULT 0,
       approved_push INTEGER DEFAULT 0,
+      lifecycle_stage TEXT DEFAULT '01_received',
+      completion_contract TEXT DEFAULT '{}',
+      verification_report TEXT DEFAULT '{}',
+      failure_classification TEXT,
+      attempt_count INTEGER DEFAULT 0,
+      last_error_code TEXT,
+      blocked_on TEXT,
+      pr_url TEXT,
       created_at TEXT DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT DEFAULT CURRENT_TIMESTAMP
     )
@@ -155,6 +182,14 @@ async function initTasksTable() {
     "ALTER TABLE agent_tasks ADD COLUMN backups TEXT DEFAULT '{}'",
     "ALTER TABLE agent_tasks ADD COLUMN approved_commit INTEGER DEFAULT 0",
     "ALTER TABLE agent_tasks ADD COLUMN approved_push INTEGER DEFAULT 0",
+    "ALTER TABLE agent_tasks ADD COLUMN lifecycle_stage TEXT DEFAULT '01_received'",
+    "ALTER TABLE agent_tasks ADD COLUMN completion_contract TEXT DEFAULT '{}'",
+    "ALTER TABLE agent_tasks ADD COLUMN verification_report TEXT DEFAULT '{}'",
+    "ALTER TABLE agent_tasks ADD COLUMN failure_classification TEXT",
+    "ALTER TABLE agent_tasks ADD COLUMN attempt_count INTEGER DEFAULT 0",
+    "ALTER TABLE agent_tasks ADD COLUMN last_error_code TEXT",
+    "ALTER TABLE agent_tasks ADD COLUMN blocked_on TEXT",
+    "ALTER TABLE agent_tasks ADD COLUMN pr_url TEXT",
   ];
   for (const sql of cols) {
     try { await db.exec(sql); } catch { /* column already exists */ }

@@ -16,6 +16,26 @@ const CAPS = [
   { key: 'tasks', label: 'Task-uri',  icon: '✅', path: '/api/agent/tasks' },
 ]
 
+const CONTRACT_LABELS = [
+  ['received', 'Primit'],
+  ['understood', 'Inteles'],
+  ['searchedCode', 'Cod citit'],
+  ['modifiedFiles', 'Editat'],
+  ['tested', 'Testat'],
+  ['repairedIfNeeded', 'Reparat'],
+  ['branchCreated', 'Branch'],
+  ['committed', 'Commit'],
+  ['pushed', 'Push'],
+  ['prCreated', 'PR'],
+  ['waitingHumanMerge', 'Merge uman'],
+  ['postMergeVerified', 'Live verificat'],
+]
+
+function contractProgress(contract = {}) {
+  const done = CONTRACT_LABELS.filter(([key]) => Boolean(contract[key])).length
+  return Math.round((done / CONTRACT_LABELS.length) * 100)
+}
+
 export default function AgentPage() {
   const { getCsrfToken } = useOutletContext()
   const toast = useToast()
@@ -101,23 +121,48 @@ export default function AgentPage() {
         <div style={{ opacity: 0.4, fontSize: 13 }}>Niciun task încă.</div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          {tasks.slice(0, 10).map(t => (
+          {tasks.slice(0, 10).map(t => {
+            const progress = contractProgress(t.completionContract || t.completion_contract)
+            const stage = t.lifecycleStage || t.lifecycle_stage || t.status
+            const prUrl = t.prUrl || t.pr_url
+            return (
             <div key={t.id} style={{
               background: 'var(--admin-surface-2)',
               border: '1px solid var(--admin-border)',
               borderRadius: 8,
               padding: '10px 14px',
               fontSize: 13,
-              display: 'flex',
-              justifyContent: 'space-between',
+              display: 'grid',
+              gap: 8,
             }}>
-              <span>{t.title}</span>
-              <span style={{
-                color: t.status === 'done' ? 'var(--admin-green)' :
-                       t.status === 'error' ? 'var(--admin-red)' : 'var(--admin-amber)'
-              }}>{t.status}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <span>{t.title}</span>
+                <span style={{
+                  color: t.status === 'done' ? 'var(--admin-green)' :
+                         t.status === 'failed' || t.status === 'blocked' ? 'var(--admin-red)' : 'var(--admin-amber)'
+                }}>{t.status}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, opacity: 0.72 }}>
+                <span>{stage}</span>
+                <span>{progress}%</span>
+              </div>
+              <div style={{ height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                <div style={{
+                  width: `${progress}%`,
+                  height: '100%',
+                  background: progress >= 100 ? 'var(--admin-green)' : 'var(--admin-purple)',
+                }} />
+              </div>
+              {t.statusDetail || t.status_detail ? (
+                <div style={{ opacity: 0.58 }}>{t.statusDetail || t.status_detail}</div>
+              ) : null}
+              {prUrl ? (
+                <a href={prUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--admin-purple)' }}>
+                  PR catre master
+                </a>
+              ) : null}
             </div>
-          ))}
+          )})}
         </div>
       )}
     </div>

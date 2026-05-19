@@ -364,8 +364,17 @@ ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS modified_paths  JSONB DEFAULT '
 ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS backups         JSONB DEFAULT '{}'::jsonb;
 ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS approved_commit BOOLEAN DEFAULT FALSE;
 ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS approved_push   BOOLEAN DEFAULT FALSE;
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS lifecycle_stage TEXT DEFAULT '01_received';
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS completion_contract JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS verification_report JSONB DEFAULT '{}'::jsonb;
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS failure_classification TEXT;
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS attempt_count INTEGER DEFAULT 0;
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS last_error_code TEXT;
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS blocked_on TEXT;
+ALTER TABLE agent_tasks ADD COLUMN IF NOT EXISTS pr_url TEXT;
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_status ON agent_tasks(status);
 CREATE INDEX IF NOT EXISTS idx_agent_tasks_parent ON agent_tasks(parent_id);
+CREATE INDEX IF NOT EXISTS idx_agent_tasks_lifecycle ON agent_tasks(lifecycle_stage);
 
 CREATE TABLE IF NOT EXISTS vision_revenue (
   id              BIGSERIAL PRIMARY KEY,
