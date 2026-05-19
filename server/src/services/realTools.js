@@ -2460,13 +2460,13 @@ async function toolZapierTrigger(args) {
 
 // ── GitHub Autonomous Push ──────────────────────────────────────────
 async function toolCommitAndPushToGithub(args) {
-  if (!process.env.GITHUB_TOKEN) {
-    return { ok: false, error: 'GITHUB_TOKEN environment variable is missing. Tell the user to set it in Railway or locally before you can push.' };
+  const token = agentRepo.githubToken();
+  if (!token) {
+    return { ok: false, error: 'GitHub token is missing. Set GITHUB_TOKEN, AGENT_GITHUB_TOKEN, or GH_TOKEN before Kelion can push.' };
   }
 
   const msg = args.commit_message || 'Update from Kelion';
   const branch = args.branch || `kelion/auto-${Date.now()}`;
-  const token = process.env.GITHUB_TOKEN;
 
   try {
     const { execSync } = require('child_process');
@@ -4867,12 +4867,12 @@ async function toolRunAgentEval(args) {
   ];
 
   if (action === 'list') {
-    return { ok: true, action: 'list', tests, total: tests.length, file: testFile };
+    return { ok: true, executed: false, action: 'list', tests, total: tests.length, file: testFile };
   }
 
   if (action === 'status') {
     const exists = _fs.existsSync(testFile);
-    return { ok: true, action: 'status', tests, file_exists: exists, total: tests.length, note: 'Use action:run to execute.' };
+    return { ok: true, executed: false, action: 'status', tests, file_exists: exists, total: tests.length, note: 'Use action:run to execute.' };
   }
 
   if (action === 'run') {
@@ -4898,6 +4898,7 @@ async function toolRunAgentEval(args) {
       const passed = stdout.includes('Tests:') && stdout.includes('passed') && !stdout.includes('failed');
       return {
         ok: true,
+        executed: true,
         action: 'run',
         pattern,
         passed,
@@ -4905,7 +4906,7 @@ async function toolRunAgentEval(args) {
         errors: stderr?.slice(-500) || '',
       };
     } catch (err) {
-      return { ok: false, error: err.message?.slice(0, 500), pattern };
+      return { ok: false, executed: true, error: err.message?.slice(0, 500), pattern };
     }
   }
 

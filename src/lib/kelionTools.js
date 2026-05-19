@@ -329,8 +329,10 @@ function compactToolRaw(value, depth = 0) {
 function makeToolProof(name, raw, summary) {
   const text = String(summary || raw?.error || '')
   const failed = raw?.ok === false || !!raw?.error || /\b(failed|error|not implemented|forbidden|unauthorized|cannot|can't|nu pot)\b/i.test(text)
+  const statusOnly = raw?.action === 'status' || raw?.action === 'list'
   return {
     ok: !failed,
+    executed: !failed && !statusOnly,
     tool: name,
     summary: text,
     error: failed ? (raw?.error || text) : null,

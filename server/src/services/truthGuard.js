@@ -18,6 +18,8 @@ function stringify(value) {
 function responseOk(response) {
   if (response == null) return false;
   if (typeof response === 'object') {
+    if (response.executed === false) return false;
+    if ((response.action === 'status' || response.action === 'list') && response.executed !== true) return false;
     if (response.ok === true) return true;
     if (response.ok === false) return false;
     if (response.success === true) return true;

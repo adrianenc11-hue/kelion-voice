@@ -49,4 +49,13 @@ describe('Truth guard', () => {
     expect(evidence.ok).toBe(1);
     expect(evidence.failed).toBe(1);
   });
+
+  it('does not treat status/list responses as execution proof', () => {
+    const guarded = guardReply({
+      reply: 'Am executat auditul.',
+      toolResponses: [{ name: 'run_agent_eval', response: { ok: true, action: 'status', note: 'Use action:run to execute.' } }],
+    });
+
+    expect(guarded.changed).toBe(true);
+  });
 });
