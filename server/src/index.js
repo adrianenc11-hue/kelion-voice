@@ -466,6 +466,16 @@ app.get('/health', async (_req, res) => {
 
   res.json(health);
 });
+app.get('/readyz', (_req, res) => {
+  const ready = startupHealth.database === 'connected';
+  res.status(ready ? 200 : 503).json({
+    status: ready ? 'ready' : 'not_ready',
+    database: startupHealth.database,
+    ai_provider: process.env.OPENROUTER_API_KEY ? 'openrouter' : 'none',
+    voice_provider: process.env.ELEVENLABS_API_KEY ? 'elevenlabs' : 'none',
+    ts: new Date().toISOString(),
+  });
+});
 app.get('/ping',   (_req, res) => res.send('<h1>PONG - Server is alive and reached!</h1>'));
 
 if (process.env.NODE_ENV === 'production') {

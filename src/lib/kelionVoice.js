@@ -794,20 +794,20 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
       const geoQuery = (coords && Number.isFinite(coords.lat) && Number.isFinite(coords.lon))
         ? `&lat=${coords.lat.toFixed(6)}&lon=${coords.lon.toFixed(6)}&acc=${Math.round(coords.accuracy || 0)}`
         : ''
-      // Backend selector. Default is `aistudio` — legacy path.
-      // Current production uses OpenRouter. Matches the server default
-      // (realtime.js). `?liveBackend=vertex` (or
-      // `localStorage.kelion_live_backend = 'vertex'`) forces the Vertex AI
-      // proxy path — requires GCP billing to be enabled.
-      let liveBackend = 'aistudio'
+      // Backend selector. Kelion voice uses OpenRouter/Claude only.
+      // Google AI Studio / Gemini / Vertex are intentionally ignored for
+      // the main brain because Adrian explicitly disabled Gemini.
+      let liveBackend = 'openrouter'
       try {
         const fromUrl = new URL(window.location.href).searchParams.get('liveBackend')
         const fromStorage = window.localStorage?.getItem('kelion_live_backend')
         const raw = (fromUrl || fromStorage || '').toString().toLowerCase()
-        if (raw === 'vertex') liveBackend = 'vertex'
-        if (raw === 'aistudio') liveBackend = 'aistudio'
+        if (raw === 'openrouter' || raw === 'claude') liveBackend = 'openrouter'
+        if (raw === 'vertex' || raw === 'aistudio' || raw === 'gemini') {
+          try { window.localStorage?.setItem('kelion_live_backend', 'openrouter') } catch (_) {}
+        }
       } catch (_) { /* window/localStorage missing in SSR — default stays */ }
-      const backendQuery = liveBackend === 'aistudio' ? '&backend=aistudio' : '&backend=vertex'
+      const backendQuery = '&backend=openrouter'
       // Send client's real timezone so Kelion knows the actual time of day
       const clientTz = Intl.DateTimeFormat().resolvedOptions().timeZone || ''
       const clientLocalTime = new Date().toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })
@@ -848,9 +848,7 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
       const tokenBody = await tokenRes.json()
       const token = tokenBody?.token
       const setupPayload = tokenBody?.setup
-      const resolvedBackend = tokenBody?.backend === 'vertex' ? 'vertex'
-        : tokenBody?.backend === 'openrouter' ? 'openrouter'
-          : 'aistudio'
+      const resolvedBackend = 'openrouter'
       // Vertex and OpenRouter paths don't return a token (Vertex auth
       // lives on the server-side proxy; OpenRouter uses REST Voice Mode).
       // Only enforce the token presence for AI Studio.
@@ -1796,34 +1794,8 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
           const currentAbortSignal = httpAbortRef.current.signal;
           let data;
 
-          // ── Puter.js PRIMARY path (Claude Opus 4.7 — free, fast, NO POPUP) ──
-          try {
-            // Load Puter.js via CDN if not already loaded
-            if (!window.puter) {
-              const existing = document.querySelector('script[src*="puter.com"]');
-              if (!existing) {
-                const s = document.createElement('script');
-                s.src = 'https://js.puter.com/v2/';
-                document.head.appendChild(s);
-                await new Promise(r => setTimeout(r, 2000));
-              }
-            }
-            const puter = window.puter;
-            // ONLY proceed if already authenticated (no popup trigger)
-            const isAuthed = puter && puter.authToken;
-            if (puter && puter.ai && isAuthed && (!toolResponses || toolResponses.length === 0)) {
-              _setTaskStatus({ tool: 'puter-opus', progress: 20, label: '🧠 Opus 4.7 (Puter)...', phase: 'thinking' });
-              const sysPrompt = "You are KelionAI, a genius expert coder and architect. You speak Romanian natively. Do your best to help the user immediately. Output the response in raw text.";
-              const puterResp = await puter.ai.chat([{ role: 'system', content: sysPrompt }, { role: 'user', content: currentMessage }], { model: 'claude-opus-4-7' });
-              const replyText = typeof puterResp === 'string' ? puterResp : (puterResp?.message?.content?.[0]?.text || puterResp?.message?.content || puterResp?.toString() || '');
-              if (replyText) {
-                data = { reply: replyText, model: 'claude-opus-4-7 (Puter)' };
-              }
-              _setTaskStatus({ tool: 'puter-opus', progress: 80, label: '✅ Răspuns Opus primit', phase: 'working' });
-            }
-          } catch (e) {
-            console.log('[kelionVoice] Puter fallback to backend:', e?.message || e);
-          }
+          // No hidden browser-side AI provider here. All production chat goes
+          // through /api/chat so provider, model, cost guard and logs stay real.
 
           // ── Backend API call ──
           if (!data) {
@@ -1983,7 +1955,7 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
         }
         _failTask(err?.message || 'Eroare de conexiune');
         console.error('[kelionVoice] HTTP chat fallback failed', err)
-        appendTurn('assistant', 'Connection error. Please try again.', true)
+        appendTurn('assistant', err?.message || 'Eroare de conexiune. Incearca din nou.', true, 'Eroare conexiune')
         setStatus(window.__restRecRef ? 'listening' : 'idle')
       } finally {
         httpBusyRef.current = false

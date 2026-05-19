@@ -1510,9 +1510,12 @@ const voiceTokenHandler = async (req, res) => {
   // env var on Railway, or per-request via `?backend=vertex`.
   const rawBackend = ((req.body && req.body.backend)
     || req.query.backend
-    || process.env.GOOGLE_LIVE_BACKEND
+    || process.env.KELION_LIVE_BACKEND
     || '').toString().toLowerCase();
-  const backend = rawBackend === 'vertex' ? 'vertex' : 'aistudio';
+  const backend = 'openrouter';
+  if (rawBackend && !['openrouter', 'claude'].includes(rawBackend)) {
+    console.warn(`[voice-token] Ignoring disabled live backend "${rawBackend}"; using OpenRouter/Claude.`);
+  }
   // For Vertex we need a project id to build the fully-qualified
   // `projects/<P>/locations/<L>/publishers/google/models/<M>` path
   // that Vertex BidiGenerateContent reads from the first setup frame.
@@ -1523,20 +1526,7 @@ const voiceTokenHandler = async (req, res) => {
   // that looks to operators like "it worked". Reuse the exact same
   // resolver the proxy uses so there is a single source of truth
   // (Copilot + Devin Review flagged this P2 on PR #207).
-  let vertexResolved = { project: '', location: 'us-central1' };
-  if (backend === 'vertex') {
-    try {
-      vertexResolved = require('./vertexLiveProxy')._internals.resolveProjectAndLocation();
-    } catch (_) { /* resolver unavailable — fall through to 503 below */ }
-    if (!vertexResolved.project) {
-      return res.status(503).json({
-        error: 'Vertex backend is unconfigured on this deployment. '
-          + 'Set GOOGLE_CLOUD_PROJECT (or embed project_id in '
-          + 'GCP_SERVICE_ACCOUNT_JSON), or force the legacy backend '
-          + 'per-request with ?backend=aistudio.',
-      });
-    }
-  }
+  // Vertex and AI Studio legacy paths stay disabled for the main brain.
   // The Vertex backend and AI Studio legacy paths are no longer relevant 
   // since we migrated to OpenRouter/Claude Opus natively. We removed the
   // GOOGLE_API_KEY block requirement here.
