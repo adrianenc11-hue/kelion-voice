@@ -10,9 +10,8 @@
  * Providers vary a lot:
  *
  *
- *  - Claude Opus (Google AI Studio / OpenRouter): no public balance endpoint. We test the key
- *    with a cheap models.list call and return a "configured" signal + link
- *    to the aistudio console where the admin can rotate/check billing.
+ *  - Claude/OpenRouter: /auth/key exposes usage/limit for the OpenRouter key
+ *    used by Kelion's Claude brain.
  *
  *  - ElevenLabs: /v1/user/subscription returns character_count /
  *    character_limit — exact remaining quota, translated to a fraction.
@@ -45,43 +44,20 @@ function maskKey(key) {
 }
 
 async function probeGoogleAI() {
-  const apiKey = config.google && config.google.apiKey;
   const card = {
     id: 'google',
-    name: 'Claude Opus (Google)',
-    subtitle: 'Live voice + chat',
-    configured: Boolean(apiKey),
-    keyFingerprint: maskKey(apiKey),
+    name: 'Google AI Studio',
+    subtitle: 'Disabled for Kelion brain',
+    configured: false,
+    keyFingerprint: null,
     balance: null,          // Google does not expose remaining quota for AI Studio keys
-    balanceDisplay: 'Check in AI Studio',
+    balanceDisplay: 'Disabled',
     unit: null,
-    status: 'unknown',      // ok | low | error | unknown
-    message: null,
+    status: 'disabled',      // ok | low | error | unknown | disabled
+    message: 'Kelion chat/model routing uses Claude/OpenRouter only.',
     topUpUrl: 'https://aistudio.google.com/apikey',
     billingUrl: 'https://console.cloud.google.com/billing',
   };
-  if (!apiKey) {
-    card.status = 'error';
-    card.message = 'GOOGLE_API_KEY not set';
-    return card;
-  }
-  try {
-    const r = await fetchWithTimeout(
-      `https://generativelanguage.googleapis.com/v1alpha/models?key=${apiKey}&pageSize=1`,
-      { method: 'GET' },
-    );
-    if (r.ok) {
-      card.status = 'ok';
-      card.message = 'API key valid';
-    } else {
-      const body = await r.text().catch(() => '');
-      card.status = 'error';
-      card.message = `HTTP ${r.status}: ${body.slice(0, 200)}`;
-    }
-  } catch (err) {
-    card.status = 'error';
-    card.message = err && err.message ? err.message : 'network error';
-  }
   return card;
 }
 
@@ -301,14 +277,13 @@ async function probeRailway() {
  */
 async function getAllCredits() {
   // Order is display order in the admin grid.
-  const [googleAI, openrouter, elevenlabs, stripe, railway] = await Promise.all([
-    probeGoogleAI(),
+  const [openrouter, elevenlabs, stripe, railway] = await Promise.all([
     probeOpenRouter(),
     probeElevenLabs(),
     probeStripe(),
     probeRailway(),
   ]);
-  return [googleAI, openrouter, elevenlabs, stripe, railway].map((card) => ({
+  return [openrouter, elevenlabs, stripe, railway].map((card) => ({
     ...card,
     provider: card.id,
     providerLabel: card.name || card.id,
@@ -425,12 +400,12 @@ async function buildRevenueSplit(revenueSummary, { days = 30, currency = 'gbp' }
   // currencies explicit so the admin can eyeball the buffer.
   const knownSpendCents = Number(elevenlabs.estSpendCents || 0);
 
-  // Claude Opus cost is unknown from our side. Honest "null" so UI can
-  // render a manual-entry placeholder instead of pretending $0.
-  const googleAI = {
+  // Claude/OpenRouter spend is tracked by OpenRouter; keep the allocation
+  // note pointed at the real provider, not Google AI Studio.
+  const openrouter = {
     source: 'manual',
-    note: 'Claude Opus spend is not exposed via AI Studio keys. Use GCP Billing dashboard to cross-check.',
-    billingUrl: 'https://console.cloud.google.com/billing',
+    note: 'Claude Opus spend runs through OpenRouter. Use OpenRouter credits/usage to cross-check.',
+    billingUrl: 'https://openrouter.ai/settings/credits',
   };
 
   // Delta compares allocated revenue against *known* spend only. When
@@ -463,7 +438,7 @@ async function buildRevenueSplit(revenueSummary, { days = 30, currency = 'gbp' }
       ownerDisplay: formatMinorCurrency(ownerCents, currency),
     },
     spend: {
-      googleAI,
+      openrouter,
       elevenlabs: {
         configured: elevenlabs.configured,
         status: elevenlabs.status,

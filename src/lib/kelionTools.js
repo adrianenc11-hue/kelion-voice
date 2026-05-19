@@ -583,11 +583,11 @@ function autoDisplayOnMonitor(name, j, args) {
           <span style="text-align:right;word-break:break-all;max-width:60%">${val.replace(/</g,'&lt;')}</span>
         </div>`
       }).join('')
-      const toolLabel = name.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
+      const toolLabel = 'Rezultat'
       handleShowOnMonitor({
         kind: 'html',
         query: `<div style="padding:32px;font-family:system-ui;color:#ede9fe;min-height:100%;background:linear-gradient(135deg,#0f0a1e,#1a1145)">
-          <div style="font-size:13px;color:#a78bfa;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Tool Result</div>
+          <div style="font-size:13px;color:#a78bfa;letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">Rezultat</div>
           <div style="font-size:24px;font-weight:700;margin-bottom:20px">${toolLabel}</div>
           ${rows}
         </div>`,

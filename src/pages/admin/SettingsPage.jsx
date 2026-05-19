@@ -31,7 +31,6 @@ export default function SettingsPage() {
 
   const keyRows = [
     { label: 'OPENROUTER_API_KEY', status: info?.keys?.openrouter || 'unknown' },
-    { label: 'GOOGLE_API_KEY', status: info?.keys?.google || 'unknown' },
     { label: 'STRIPE_SECRET_KEY', status: info?.keys?.stripe || 'unknown' },
     { label: 'ELEVENLABS_API_KEY', status: info?.keys?.elevenlabs || 'unknown' },
   ]

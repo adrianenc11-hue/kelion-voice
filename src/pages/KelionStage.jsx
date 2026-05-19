@@ -1926,8 +1926,8 @@ export default function KelionStage() {
                           )}
                           <span>
                             {status === 'listening' && 'Recepție...'}
-                            {status === 'thinking' && (taskStatus ? `🧠 ${taskStatus.label}` : 'Gândește...')}
-                            {status === 'working' && (taskStatus ? `⚙️ ${taskStatus.tool.replace(/_/g,' ')}` : 'Aplică unelte...')}
+                            {status === 'thinking' && (taskStatus ? (taskStatus.label || 'Kelion lucreaza...') : 'Gandeste...')}
+                            {status === 'working' && (taskStatus ? (taskStatus.label || 'Kelion lucreaza...') : 'Aplica unelte...')}
                             {status === 'speaking' && 'Răspunde...'}
                             {status === 'idle' && 'Inactiv'}
                             {status === 'error' && 'Eroare'}
