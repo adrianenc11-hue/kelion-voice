@@ -23,26 +23,22 @@ const TOOL_CATEGORIES = {
     'learn_from_observation',
     'remember_fact',
     'get_action_history',
-    'ui_notify',
-    'show_on_monitor',
-    'query_database',
     'conversation_summary',
     'read_past_conversation',
     'thinking_mode',
     'memory_sources',
-    'run_command',
     // Adrian 2026-05-18: added missing tools that should always be available
     'session_persist',
-    'parallel_tools',
-    'task_orchestrator',
     'deep_memory_architect',
-    'universal_executor',
     'self_evaluate',
-    'smart_monitor',
-    'smart_alert',
     'context_cache',
-    'system_bridge',
     'mcp_protocol',
+  ],
+
+  // Visible monitor output. This must be explicitly requested by the user.
+  MONITOR_DISPLAY: [
+    'show_on_monitor',
+    'ui_notify',
   ],
 
   // Greetings and simple conversation — no tools needed beyond CORE
@@ -187,6 +183,14 @@ const TOOL_CATEGORIES = {
     'scheduled_task',
   ],
 
+  // User explicitly asks Kelion to watch/monitor/alert on something.
+  MONITORING: [
+    'smart_monitor',
+    'smart_alert',
+    'scheduled_task',
+    'scheduler_pro',
+  ],
+
   // User account
   ACCOUNT: [
     'get_my_credits',
@@ -244,6 +248,16 @@ const TOOL_CATEGORIES = {
 // Trigger patterns for each category
 // Each entry: { patterns: RegExp[], keywords: string[] }
 const CATEGORY_TRIGGERS = {
+  MONITOR_DISPLAY: {
+    patterns: [
+      /arat[aă].*(ecran|monitor|display)/i,
+      /pune.*(pe|in|în).*(ecran|monitor|display)/i,
+      /deschide.*(pe|in|în).*(ecran|monitor|display)/i,
+      /show.*(screen|monitor|display)/i,
+      /display.*(screen|monitor)/i,
+    ],
+    keywords: ['pe ecran', 'pe monitor', 'in monitor', 'în monitor', 'show screen', 'show monitor'],
+  },
   GEO_WEATHER: {
     patterns: [
       /vrem\w*/i, /temperatur/i, /ploua|ploi|ninge|vânt|soare/i,
@@ -376,6 +390,14 @@ const CATEGORY_TRIGGERS = {
     keywords: ['calendar', 'eveniment', 'event', 'ședință', 'meeting',
       'mail', 'email', 'mesaj', 'inbox', 'drive', 'dropbox',
       'zapier', 'webhook', 'invitație', 'invite'],
+  },
+  MONITORING: {
+    patterns: [
+      /monitorizeaz[aă]|urm[aă]re[sș]te|watch.*for|keep.*eye/i,
+      /alert[aă].*c[aă]nd|notify.*when|anun[tț][aă].*c[aă]nd/i,
+      /verific[aă].*(periodic|la fiecare|din c[aă]nd)/i,
+    ],
+    keywords: ['monitorizeaza', 'monitorizează', 'urmareste', 'urmărește', 'alerta cand', 'alertă când', 'notify when', 'watch for'],
   },
   ACCOUNT: {
     patterns: [

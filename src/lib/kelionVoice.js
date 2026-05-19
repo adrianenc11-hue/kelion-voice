@@ -1857,7 +1857,7 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
               const serverError = err.code === 'AI_PROVIDER_NOT_CONFIGURED'
                 ? 'Nu exista provider AI configurat pe server. Seteaza OPENROUTER_API_KEY in Railway pentru kelionai.app.'
                 : err.code === 'OPENROUTER_INSUFFICIENT_CREDITS'
-                  ? 'AI/OpenRouter nu are credit. Adauga credit in OpenRouter, apoi testeaza din nou Kelion.'
+                  ? 'OpenRouter a refuzat requestul cu 402. Verifica soldul real din OpenRouter Credits, accesul cheii si modelul Claude selectat.'
                 : err.code === 'CHAT_AI_TIMEOUT'
                   ? 'AI request timeout pe server. Incearca din nou dupa redeploy.'
                   : edgeHtmlError
@@ -1868,6 +1868,9 @@ export function useKelionVoice({ audioRef, coords = null, onBalanceUpdate = null
               break;
             }
             data = await r.json()
+            if (data.costGuardNotice?.message) {
+              appendTurn('assistant', data.costGuardNotice.message, true, 'Admin cost guard')
+            }
             if (data.needsFastModeDecision) {
               httpBusyRef.current = false;
               return data;
