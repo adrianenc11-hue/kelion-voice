@@ -208,18 +208,6 @@ async function _saveState(taskId, state) {
         prUrl: state.prUrl || null,
       },
     });
-    await brainBus.emit({
-      source: 'agent_orchestrator',
-      kind: 'state_saved',
-      summary: `Task ${taskId} status=${state.status}${state.prUrl ? ` PR=${state.prUrl}` : ''}`,
-      taskId,
-      ok: state.status !== 'failed' && state.status !== 'blocked',
-      payload: {
-        status: state.status,
-        modifiedPaths: Array.from(state.modifiedPaths || []),
-        prUrl: state.prUrl || null,
-      },
-    });
     return { ok: true };
   } catch (err) {
     console.error('[agentOrchestrator] _saveState failed:', err && err.message);
@@ -270,7 +258,7 @@ function _progressNarrativesEnabled() {
 }
 
 function _pushNarrative(state, entry, options = {}) {
-  if (options.always || _progressNarrativesEnabled()) {
+  if (_progressNarrativesEnabled() || options.critical) {
     state.narratives.push({ ...entry, ts: entry.ts || new Date().toISOString() });
   }
 }
@@ -473,8 +461,16 @@ async function _executeStep(taskId, step, state) {
         }
         r = await agentGitHub.createPr(branch, step.title, step.body);
         if (r.ok) {
-          state.prUrl = r.data?.html_url || r.data?.url || null;
+          state.prUrl = r.data?.html_url || r.data?.url || r.url || null;
           state.prNumber = r.data?.number || null;
+          state.completionContract.pullRequestOpened = true;
+          if (r.existing || r.merged || r.closed || r.noDiff) {
+            state.statusDetail = r.merged
+              ? `PR already merged: ${state.prUrl || branch}`
+              : r.noDiff
+                ? `No diff against master; existing PR checked: ${state.prUrl || branch}`
+                : `PR already exists: ${state.prUrl || branch}`;
+          }
         }
         log('pr', { branch, ok: r.ok });
         break;

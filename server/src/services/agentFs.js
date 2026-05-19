@@ -2,9 +2,13 @@
 
 const fs = require('fs').promises;
 const path = require('path');
+const agentRepo = require('./agentRepo');
 
 function getAllowedRoot() {
-  return process.env.AGENT_FS_ROOT || process.env.AGENT_SHELL_CWD || process.cwd();
+  if (process.env.AGENT_FS_ROOT) return process.env.AGENT_FS_ROOT;
+  const repo = agentRepo.ensureAgentRepoSync({ requestedCwd: process.env.AGENT_SHELL_CWD || process.cwd() });
+  if (repo.ok && repo.cwd) return repo.cwd;
+  return process.env.AGENT_SHELL_CWD || process.cwd();
 }
 
 function normalizePath(input) {

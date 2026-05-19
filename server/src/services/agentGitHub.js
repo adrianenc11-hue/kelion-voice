@@ -68,14 +68,51 @@ function githubRequest(path, method = 'GET', body = null) {
   });
 }
 
-async function createPr(branch, title, body = '', base = REQUIRED_PR_BASE) {
+async function compareBranch(branch, base = REQUIRED_PR_BASE, request = githubRequest) {
+  if (!isSafePrBranch(branch)) {
+    return { ok: false, error: 'Compare requires a non-master feature branch.' };
+  }
+  return request(`/compare/${encodeURIComponent(base)}...${encodeURIComponent(branch)}`);
+}
+
+async function findPrForBranch(branch, state = 'all', request = githubRequest) {
+  if (!isSafePrBranch(branch)) {
+    return { ok: false, error: 'PR lookup requires a non-master feature branch.' };
+  }
+  const head = encodeURIComponent(`${REPO_OWNER}:${branch}`);
+  const result = await request(`/pulls?state=${encodeURIComponent(state)}&head=${head}`);
+  if (!result.ok) return result;
+  const prs = Array.isArray(result.data) ? result.data : [];
+  return { ok: true, data: prs[0] || null, all: prs };
+}
+
+async function createPr(branch, title, body = '', base = REQUIRED_PR_BASE, request = githubRequest) {
   if (!isSafePrBranch(branch)) {
     return { ok: false, error: 'PR creation requires a non-master feature branch.' };
   }
   if (!isAllowedPrBase(base)) {
     return { ok: false, error: `PR creation is locked to ${REQUIRED_PR_BASE}. Open a PR into master, not ${base}.` };
   }
-  const result = await githubRequest('/pulls', 'POST', { title, head: branch, base: REQUIRED_PR_BASE, body });
+  const diff = await compareBranch(branch, REQUIRED_PR_BASE, request);
+  if (!diff.ok && diff.status === 404) {
+    return { ok: false, error: `Branch ${branch} is not available on GitHub. Push the branch before creating PR.` };
+  }
+  if (!diff.ok) return diff;
+  if (Number(diff.data?.ahead_by || 0) === 0) {
+    const existing = await findPrForBranch(branch, 'all', request);
+    if (existing.ok && existing.data) {
+      return {
+        ok: true,
+        data: existing.data,
+        existing: true,
+        merged: !!existing.data.merged_at,
+        closed: existing.data.state === 'closed',
+        noDiff: true,
+      };
+    }
+    return { ok: false, error: `Branch ${branch} has no diff against ${REQUIRED_PR_BASE}; nothing to open.` };
+  }
+  const result = await request('/pulls', 'POST', { title, head: branch, base: REQUIRED_PR_BASE, body });
   if (!result.ok && result.status === 403) {
     return {
       ...result,
@@ -83,9 +120,15 @@ async function createPr(branch, title, body = '', base = REQUIRED_PR_BASE) {
     };
   }
   if (!result.ok && result.status === 422) {
-    const existing = await githubRequest(`/pulls?state=open&head=${encodeURIComponent(`${REPO_OWNER}:${branch}`)}`);
-    if (existing.ok && Array.isArray(existing.data) && existing.data.length) {
-      return { ok: true, data: existing.data[0], existing: true };
+    const existing = await findPrForBranch(branch, 'all', request);
+    if (existing.ok && existing.data) {
+      return {
+        ok: true,
+        data: existing.data,
+        existing: true,
+        merged: !!existing.data.merged_at,
+        closed: existing.data.state === 'closed',
+      };
     }
     return {
       ...result,
@@ -106,4 +149,4 @@ async function mergePr(number) {
   return githubRequest(`/pulls/${number}/merge`, 'PUT', { merge_method: 'squash' });
 }
 
-module.exports = { createPr, listOpenPrs, mergePr, isSafePrBranch, isAllowedPrBase };
+module.exports = { createPr, listOpenPrs, mergePr, isSafePrBranch, isAllowedPrBase, compareBranch, findPrForBranch };

@@ -66,8 +66,27 @@ async function checkStripeWebhook() {
 async function checkGithubToken() {
   const key = process.env.GITHUB_TOKEN || process.env.AGENT_GITHUB_TOKEN || process.env.GH_TOKEN;
   if (!key) return { name: 'GitHub Token', ok: false, requiredForAutonomy: true, error: 'Not set (GITHUB_TOKEN, AGENT_GITHUB_TOKEN, or GH_TOKEN)' };
-  const r = await fetchJson('https://api.github.com/user', { headers: { 'Authorization': `token ${key}`, 'User-Agent': 'KelionAgent' } });
-  return { name: 'GitHub Token', ok: r.ok, requiredForAutonomy: true, status: r.status, error: r.ok ? null : 'Invalid token' };
+  const owner = process.env.GITHUB_REPO_OWNER || 'adrianenc11-hue';
+  const repo = process.env.GITHUB_REPO_NAME || 'kelionai-v2';
+  const headers = {
+    'Authorization': `token ${key}`,
+    'Accept': 'application/vnd.github+json',
+    'User-Agent': 'KelionAgent',
+  };
+  const user = await fetchJson('https://api.github.com/user', { headers });
+  if (!user.ok) return { name: 'GitHub Token', ok: false, requiredForAutonomy: true, status: user.status, error: 'Invalid token' };
+  const r = await fetchJson(`https://api.github.com/repos/${owner}/${repo}`, { headers });
+  const permissions = r.data?.permissions || {};
+  const canPushBranch = permissions.push === true || permissions.maintain === true || permissions.admin === true;
+  return {
+    name: 'GitHub Token',
+    ok: r.ok && canPushBranch,
+    requiredForAutonomy: true,
+    status: r.status,
+    repo: `${owner}/${repo}`,
+    permissions,
+    error: (r.ok && canPushBranch) ? null : 'Token is valid but cannot push branches/create PRs for the configured repo',
+  };
 }
 
 async function checkGoogleAiStudio() {
