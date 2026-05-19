@@ -422,7 +422,7 @@ router.post('/', async (req, res) => {
       if (err && err.code === 'OPENROUTER_INSUFFICIENT_CREDITS') {
         return res.status(402).json({
           code: 'OPENROUTER_INSUFFICIENT_CREDITS',
-          error: 'AI/OpenRouter nu are credit. Adauga credit in OpenRouter, apoi testeaza din nou Kelion.',
+          error: 'OpenRouter a returnat 402 pentru modelul cerut. Verifica soldul real in /api/v1/credits si limita cheii; daca dashboard-ul arata cheia operationala, cheia poate fi nelimitata dar contul/balanta/modelul inca refuza requestul.',
           ...(isAdmin ? { detail: String(err.message || err), model: err.model, step: currentStep } : {})
         });
       }

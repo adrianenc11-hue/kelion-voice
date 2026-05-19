@@ -10,8 +10,8 @@
  * Providers vary a lot:
  *
  *
- *  - Claude/OpenRouter: /auth/key exposes usage/limit for the OpenRouter key
- *    used by Kelion's Claude brain.
+ *  - Claude/OpenRouter: /key exposes key validity/limits and /credits exposes
+ *    the account credit balance when the configured key has management scope.
  *
  *  - ElevenLabs: /v1/user/subscription returns character_count /
  *    character_limit — exact remaining quota, translated to a fraction.
@@ -151,6 +151,7 @@ async function probeStripe() {
     configured: Boolean(apiKey),
     keyFingerprint: maskKey(apiKey),
     balance: null,
+    balanceLimit: null,
     balanceDisplay: '—',
     unit: 'EUR',
     status: 'unknown',
@@ -217,7 +218,7 @@ async function probeOpenRouter() {
     return card;
   }
   try {
-    const r = await fetchWithTimeout('https://openrouter.ai/api/v1/auth/key', {
+    const r = await fetchWithTimeout('https://openrouter.ai/api/v1/key', {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${apiKey}` },
     });
@@ -226,21 +227,51 @@ async function probeOpenRouter() {
       const data = j.data || j;
       const limit = typeof data.limit === 'number' ? data.limit : null;
       const usage = typeof data.usage === 'number' ? data.usage : 0;
-      const remaining = limit != null ? Math.max(0, limit - usage) : null;
-      card.balance = remaining;
+      const remaining = typeof data.limit_remaining === 'number'
+        ? data.limit_remaining
+        : (limit != null ? Math.max(0, limit - usage) : null);
+      card.keyUsage = usage;
+      card.keyLimit = limit;
+      card.keyRemaining = remaining;
       if (limit != null) {
+        card.balance = remaining;
+        card.balanceLimit = limit;
         card.balanceDisplay = `$${remaining.toFixed(2)} / $${limit.toFixed(2)}`;
         card.status = remaining < 1 ? 'low' : 'ok';
       } else {
-        // Unlimited key
-        card.balanceDisplay = `$${usage.toFixed(2)} used (no limit)`;
-        card.status = 'ok';
+        card.balanceDisplay = `$${usage.toFixed(2)} key usage (key no limit)`;
+        card.status = 'unknown';
       }
-      card.message = data.label ? `Key: ${data.label}` : null;
+      card.message = data.label ? `Key: ${data.label}` : 'Key is valid.';
     } else {
       const body = await r.text().catch(() => '');
       card.status = 'error';
       card.message = `HTTP ${r.status}: ${body.slice(0, 200)}`;
+      return card;
+    }
+
+    const credits = await fetchWithTimeout('https://openrouter.ai/api/v1/credits', {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    });
+    if (credits.ok) {
+      const j = await credits.json();
+      const data = j.data || j;
+      const totalCredits = typeof data.total_credits === 'number' ? data.total_credits : null;
+      const totalUsage = typeof data.total_usage === 'number' ? data.total_usage : null;
+      if (totalCredits != null && totalUsage != null) {
+        const available = totalCredits - totalUsage;
+        card.balance = available;
+        card.balanceLimit = totalCredits;
+        card.totalUsage = totalUsage;
+        card.balanceDisplay = `$${available.toFixed(2)} available / $${totalCredits.toFixed(2)} purchased`;
+        card.status = available <= 0 ? 'low' : 'ok';
+        card.message = `${card.message || 'Key is valid.'} Account usage: $${totalUsage.toFixed(2)}.`;
+      }
+    } else {
+      const body = await credits.text().catch(() => '');
+      if (card.status === 'unknown') card.status = 'low';
+      card.message = `${card.message || 'Key is valid.'} Account credits could not be verified from /credits (HTTP ${credits.status}). Chat may still receive OpenRouter 402 if the account balance is negative or this key lacks management scope. ${body.slice(0, 120)}`.trim();
     }
   } catch (err) {
     card.status = 'error';

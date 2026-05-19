@@ -61,6 +61,16 @@ export default function RevenuePage() {
   const biz = business?.ledger || {}
   const revenue = (biz.revenueCents || 0) / 100
   const allocPct = split?.fraction || 0.5
+  const normalizeLedgerRow = (row) => ({
+    ...row,
+    email: row.email || row.userEmail || row.user_email || null,
+    type: row.type || row.kind || null,
+    minutes: row.minutes ?? row.deltaMinutes ?? row.delta_minutes ?? 0,
+    createdAt: row.createdAt || row.created_at || null,
+    amountCents: row.amountCents ?? row.amount_cents ?? 0,
+    currency: row.currency || 'gbp',
+  })
+  const ledgerRows = ledger.map(normalizeLedgerRow)
 
   const ledgerColumns = [
     {
@@ -94,7 +104,12 @@ export default function RevenuePage() {
     {
       key: 'note',
       label: 'Notă',
-      render: (v) => <span style={{ color: 'var(--admin-text-dim)' }}>{v || ''}</span>,
+      render: (v, row) => (
+        <span style={{ color: 'var(--admin-text-dim)' }}>
+          {v || ''}
+          {row.amountCents > 0 ? ` · £${(row.amountCents / 100).toFixed(2)}` : ''}
+        </span>
+      ),
     },
     {
       key: 'createdAt',
@@ -165,7 +180,7 @@ export default function RevenuePage() {
         {loading ? <Skeleton height={200} /> : (
           <DataTable
             columns={ledgerColumns}
-            data={ledger}
+            data={ledgerRows}
             emptyText={onlyReal
               ? 'Nicio tranzacție Stripe reală încă. Topup-urile apar aici după ce un client plătește prin Checkout (necesită STRIPE_WEBHOOK_SECRET configurat pe server).'
               : 'Nicio tranzacție încă.'}
