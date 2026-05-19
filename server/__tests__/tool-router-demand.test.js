@@ -31,6 +31,16 @@ describe('tool router demand gating', () => {
     expect(result.categories).toContain('GEO_WEATHER');
     expect(names).toContain('get_weather');
     expect(names).toContain('get_my_location');
+    expect(names).not.toContain('show_on_monitor');
+  });
+
+  test('activates monitor only for explicit display intent', () => {
+    const result = selectTools('arata pe monitor vremea pentru Londra', catalog);
+    const names = result.tools.map((tool) => tool.name);
+
+    expect(result.categories).toContain('GEO_WEATHER');
+    expect(result.categories).toContain('MONITOR_DISPLAY');
+    expect(names).toContain('get_weather');
     expect(names).toContain('show_on_monitor');
   });
 

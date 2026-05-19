@@ -185,6 +185,7 @@ router.post('/', async (req, res) => {
     let creditsConsumed = 0;
     let balanceRemaining = creditsBalance;
     let creditsWarning = null;
+    let costGuardNotice = null;
     if (isHeavy && adminUser?.id && !isAdmin) {
       if (Number(creditsBalance) < TEXT_HEAVY_COST) {
         console.log(`[chat] User ${adminUser.id} has ${creditsBalance} credits, needs ${TEXT_HEAVY_COST} for heavy. Falling back to light.`);
@@ -323,6 +324,18 @@ router.post('/', async (req, res) => {
         if (result?.usage) {
           const { cost, dailyCost, remaining } = recordCost(activeModel, result.usage);
           console.log(`[chat] cost=$${cost.toFixed(4)} daily=$${dailyCost.toFixed(2)} remaining=$${remaining.toFixed(2)} model=${activeModel}`);
+          const afterBudget = checkBudget();
+          if (isAdmin && (afterBudget.warning || afterBudget.blocked)) {
+            costGuardNotice = {
+              level: afterBudget.blocked ? 'blocked' : 'warning',
+              message: afterBudget.blocked
+                ? `AI cost guard: hard cap atins ($${afterBudget.dailyCost.toFixed(2)} / $${afterBudget.hardCap}).`
+                : `AI cost guard: soft cap atins ($${afterBudget.dailyCost.toFixed(2)} / $${afterBudget.hardCap}).`,
+              dailyCost: Number(afterBudget.dailyCost.toFixed(4)),
+              remaining: Number(afterBudget.remaining.toFixed(4)),
+              hardCap: afterBudget.hardCap,
+            };
+          }
         }
       }
 
@@ -376,6 +389,7 @@ router.post('/', async (req, res) => {
           creditsConsumed,
           balanceRemaining,
           creditsWarning,
+          costGuardNotice,
         });
       }
 
@@ -409,7 +423,7 @@ router.post('/', async (req, res) => {
         }
       }
 
-      return res.json({ reply, model: activeModel });
+      return res.json({ reply, model: activeModel, costGuardNotice });
     } catch (err) {
       console.error(`[chat] AI generation failed at step=${currentStep}:`, err && err.stack || err && err.message || err);
       if (err && err.code === 'CHAT_AI_TIMEOUT') {
