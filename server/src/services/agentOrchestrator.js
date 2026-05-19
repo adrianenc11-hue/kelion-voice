@@ -593,14 +593,23 @@ async function startTask(description, options = {}) {
 }
 
 async function _startTaskLocked(description, options = {}) {
-  const { approvedCommit = false, approvedPush = false, codebaseSummary = '', autonomyStatus = null } = options;
+  const { approvedCommit = false, approvedPush = false, codebaseSummary = '', autonomyStatus = null, taskId: existingTaskId = null } = options;
 
-  const task = await createTask({
-    title: description.slice(0, 120),
-    description,
-    priority: 'high',
-  });
-  const taskId = task.id;
+  let taskId = existingTaskId;
+  if (taskId) {
+    await updateTask(taskId, {
+      description,
+      status: 'in_progress',
+      status_detail: 'Worker: task preluat din coada Agent Mode.',
+    });
+  } else {
+    const task = await createTask({
+      title: description.slice(0, 120),
+      description,
+      priority: 'high',
+    });
+    taskId = task.id;
+  }
 
   const state = {
     logs: [],
@@ -734,6 +743,23 @@ async function _startTaskLocked(description, options = {}) {
     modifiedPaths: Array.from(state.modifiedPaths),
     backups: Object.keys(state.backups),
   };
+}
+
+async function runExistingTask(taskId, options = {}) {
+  if (!_acquireLock()) {
+    return { ok: false, error: 'Another autonomous task is already running. Wait for it to finish or cancel it.', status: 'locked' };
+  }
+  try {
+    const { ok, task } = await getTask(taskId);
+    if (!ok || !task) return { ok: false, taskId, error: `Task ${taskId} not found.` };
+    const runnable = ['not_started', 'queued', 'retry'].includes(task.status);
+    if (!runnable) return { ok: false, taskId, status: task.status, error: `Task is not runnable from status ${task.status}.` };
+    const description = String(task.description || task.title || '').trim();
+    if (!description) return { ok: false, taskId, error: 'Task has no description.' };
+    return await _startTaskLocked(description, { ...options, taskId });
+  } finally {
+    _releaseLock();
+  }
 }
 
 /**
@@ -899,4 +925,4 @@ If complete is false, nextSteps should describe what remains to be done.` },
   }
 }
 
-module.exports = { startTask, approveTask, revertTask, isPathAllowed, isShellAllowed, isSafePrBranch };
+module.exports = { startTask, runExistingTask, approveTask, revertTask, isPathAllowed, isShellAllowed, isSafePrBranch };
