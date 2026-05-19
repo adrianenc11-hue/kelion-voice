@@ -48,6 +48,7 @@ const proxyRouter      = require('./routes/proxy');
 const whatsappRouter   = require('./routes/whatsapp');
 const agentRouter      = require('./routes/agent');
 const docsRouter         = require('./routes/docs');
+const inboundRouter      = require('./routes/inbound');
 const { attachVertexLiveProxy } = require('./routes/vertexLiveProxy');
 const proactive        = require('./services/proactive');
 const { bootstrapAdmin, healAdminCredits } = require('./services/adminBootstrap');
@@ -182,7 +183,7 @@ app.use(
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Kelion-Inbound-Secret'],
   })
 );
 
@@ -242,6 +243,7 @@ app.use(csrfSeed);
 // protected.
 app.use((req, res, next) => {
   if (req.path === '/api/credits/webhook') return next();
+  if (req.path === '/api/inbound/resend') return next();
   return csrfProtection(req, res, next);
 });
 
@@ -353,6 +355,7 @@ app.use('/api/trial', chatLimiter, trialRouter);
 app.use('/api/credits', creditsRouter);
 app.use('/api/diag', diagRouter);
 app.use('/api/docs', docsRouter);
+app.use('/api/inbound', inboundRouter);
 
 // Stage 3 — M13 passkey (public — register/auth flows need to be reachable
 // without auth) + M14/M16/M17 memory (signed-in users only).

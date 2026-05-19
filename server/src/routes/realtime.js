@@ -368,10 +368,11 @@ const KELION_TOOLS = [
   },
   {
     name: 'read_email',
-    description: "Search the signed-in user's email. Use when they ask about a specific message, sender, or thread.",
+    description: "Search email. Use source='kelion_inbox' for the internal contact@kelionai.app inbox; otherwise searches the signed-in user's connected Google email.",
     properties: {
       query: { type: 'string', description: 'Free-text search (sender, subject, keyword).' },
       limit: { type: 'integer', description: 'Max results (default 5).' },
+      source: { type: 'string', description: "Optional: 'kelion_inbox' for contact@kelionai.app, otherwise omit for personal email." },
     },
     required: ['query'],
   },
