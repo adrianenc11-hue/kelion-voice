@@ -6,6 +6,7 @@ const { URL } = require('url');
 const REPO_OWNER = process.env.GITHUB_REPO_OWNER || 'adrianenc11-hue';
 const REPO_NAME = process.env.GITHUB_REPO_NAME || 'kelionai-v2';
 const PROTECTED_BRANCHES = new Set(['master', 'main']);
+const REQUIRED_PR_BASE = 'master';
 
 function getGithubToken() {
   return process.env.GITHUB_TOKEN || process.env.AGENT_GITHUB_TOKEN || process.env.GH_TOKEN;
@@ -20,6 +21,10 @@ function isSafePrBranch(branch) {
     && !name.includes('@{')
     && !name.endsWith('.lock')
     && /^[A-Za-z0-9._/-]+$/.test(name);
+}
+
+function isAllowedPrBase(base) {
+  return String(base || REQUIRED_PR_BASE).trim() === REQUIRED_PR_BASE;
 }
 
 function githubRequest(path, method = 'GET', body = null) {
@@ -63,11 +68,14 @@ function githubRequest(path, method = 'GET', body = null) {
   });
 }
 
-async function createPr(branch, title, body = '', base = 'master') {
+async function createPr(branch, title, body = '', base = REQUIRED_PR_BASE) {
   if (!isSafePrBranch(branch)) {
     return { ok: false, error: 'PR creation requires a non-master feature branch.' };
   }
-  const result = await githubRequest('/pulls', 'POST', { title, head: branch, base, body });
+  if (!isAllowedPrBase(base)) {
+    return { ok: false, error: `PR creation is locked to ${REQUIRED_PR_BASE}. Open a PR into master, not ${base}.` };
+  }
+  const result = await githubRequest('/pulls', 'POST', { title, head: branch, base: REQUIRED_PR_BASE, body });
   if (!result.ok && result.status === 403) {
     return {
       ...result,
@@ -77,7 +85,7 @@ async function createPr(branch, title, body = '', base = 'master') {
   if (!result.ok && result.status === 422) {
     return {
       ...result,
-      error: `GitHub rejected PR creation. The branch may already have an open PR or no diff against ${base}: ${result.error}`,
+      error: `GitHub rejected PR creation. The branch may already have an open PR or no diff against ${REQUIRED_PR_BASE}: ${result.error}`,
     };
   }
   return result;
@@ -94,4 +102,4 @@ async function mergePr(number) {
   return githubRequest(`/pulls/${number}/merge`, 'PUT', { merge_method: 'squash' });
 }
 
-module.exports = { createPr, listOpenPrs, mergePr, isSafePrBranch };
+module.exports = { createPr, listOpenPrs, mergePr, isSafePrBranch, isAllowedPrBase };
