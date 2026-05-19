@@ -92,6 +92,17 @@ function normalizeInboundPayload(payload) {
   };
 }
 
+router.get('/resend', (req, res) => {
+  res.json({
+    ok: true,
+    endpoint: '/api/inbound/resend',
+    method: 'POST',
+    purpose: 'Resend inbound email webhook for contact@kelionai.app.',
+    browserCheck: 'This GET response is informational only. Resend must call this endpoint with POST.',
+    secretRequired: Boolean(process.env.RESEND_INBOUND_SECRET || process.env.KELION_INBOUND_SECRET),
+  });
+});
+
 router.post('/resend', webhookLimiter, async (req, res) => {
   const secret = verifyInboundSecret(req);
   if (!secret.ok) {
