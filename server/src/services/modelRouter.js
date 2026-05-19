@@ -86,7 +86,7 @@ const MODELS = {
   // Owner requested the newest version ("modelul trebuie sa fie clode 4.6 daca
   // e ultimul sau ultimul"). Opus 4.7 is the current frontier (May 2026).
   // All routes go through OpenRouter with OPENROUTER_API_KEY.
-  chat: process.env.MODEL_CHAT || 'anthropic/claude-opus-4.7',
+  chat: process.env.MODEL_CHAT || 'anthropic/claude-sonnet-4.6',
   chat_heavy: process.env.MODEL_CHAT_HEAVY || 'anthropic/claude-opus-4.7',
   chat_heavy_fast: process.env.MODEL_CHAT_HEAVY_FAST || process.env.MODEL_CHAT_HEAVY || 'anthropic/claude-opus-4.7-fast',
 
@@ -99,16 +99,16 @@ const MODELS = {
   vision: process.env.MODEL_VISION || 'anthropic/claude-opus-4.7',
   vision_heavy: process.env.MODEL_VISION_HEAVY || 'anthropic/claude-opus-4.7',
 
-  // Tandem second-brain (Kimi K2.6) — runs in parallel on heavy tasks.
-  tandem_chat: process.env.MODEL_CHAT_TANDEM || 'moonshotai/kimi-k2.6',
-  tandem_coder: process.env.MODEL_CODER_TANDEM || 'moonshotai/kimi-k2.6',
+  // Tandem second pass - Claude-only and disabled unless TANDEM_ENABLED=1.
+  tandem_chat: process.env.MODEL_CHAT_TANDEM || 'anthropic/claude-sonnet-4.6',
+  tandem_coder: process.env.MODEL_CODER_TANDEM || 'anthropic/claude-sonnet-4.6',
 };
 
 // Gemini is deliberately not used as a chat fallback. Adrian requires
 // Kelion's brain to stay on Claude/OpenRouter.
 // Fallback chain — Claude/OpenRouter only. No Gemini routes.
 const OPENROUTER_FALLBACK = {
-  chat:        ['anthropic/claude-4.7-opus', 'anthropic/claude-opus-4.7', 'anthropic/claude-sonnet-4.6'],
+  chat:        ['anthropic/claude-sonnet-4.6', 'anthropic/claude-opus-4.7'],
   chat_heavy:  ['anthropic/claude-4.7-opus', 'anthropic/claude-opus-4.7', 'anthropic/claude-sonnet-4.6'],
   coder:       ['anthropic/claude-4.7-opus', 'anthropic/claude-opus-4.7', 'anthropic/claude-sonnet-4.6'],
   coder_heavy: ['anthropic/claude-4.7-opus', 'anthropic/claude-opus-4.7', 'anthropic/claude-sonnet-4.6'],
@@ -133,9 +133,13 @@ function openRouterError(status, body, model) {
   return err;
 }
 
-function enforceClaudeOnly(model, fallback = 'anthropic/claude-opus-4.7') {
-  if (String(model || '').toLowerCase().includes('gemini')) {
-    console.warn(`[modelRouter] Ignoring Gemini model "${model}" because Kelion chat is Claude/OpenRouter only.`);
+function isClaudeModel(model) {
+  return /^anthropic\/claude/i.test(String(model || '').trim());
+}
+
+function enforceClaudeOnly(model, fallback = 'anthropic/claude-sonnet-4.6') {
+  if (!isClaudeModel(model)) {
+    console.warn(`[modelRouter] Ignoring non-Claude model "${model}" because Kelion chat is Claude/OpenRouter only.`);
     return fallback;
   }
   return model;
@@ -318,7 +322,7 @@ async function smartFetch(taskType, body, useHeavy = false, fastMode = false) {
  */
 async function runTandem(taskType, body) {
   const primaryModel = getModel(taskType, true, false); // Opus standard
-  const secondaryModel = MODELS[`tandem_${taskType}`] || MODELS.tandem_chat || 'moonshotai/kimi-k2.6';
+  const secondaryModel = enforceClaudeOnly(MODELS[`tandem_${taskType}`] || MODELS.tandem_chat);
 
   const primaryPromise = smartFetch(taskType, body, true, false);
   const secondaryPromise = (async () => {
@@ -338,7 +342,7 @@ async function runTandem(taskType, body) {
         signal: ctrl.signal,
       });
       clearTimeout(timer);
-      return { response, model: secondaryModel, provider: endpoint.provider };
+      return { response, model: endpoint.apiModel, provider: endpoint.provider };
     } catch (err) {
       clearTimeout(timer);
       throw err;
@@ -542,15 +546,22 @@ async function checkLatestModels() {
 
     console.log(`[modelRouter] 🔍 Model scan complete:`, JSON.stringify(report));
 
-    // Auto-upgrade: if a newer Claude Opus is found, verify + hot-swap
+    if (claudeSonnet[0]?.id && !process.env.MODEL_CHAT) {
+      MODELS.chat = enforceClaudeOnly(claudeSonnet[0].id, MODELS.chat);
+      MODELS.tandem_chat = MODELS.chat;
+      MODELS.tandem_coder = MODELS.chat;
+    }
+
+    // Auto-upgrade premium slots only. Routine chat deliberately remains Sonnet
+    // so the cost strategy is not undone by the model scanner.
     const bestOpus = claudeOpus[0];
     if (bestOpus && bestOpus.id) {
       // Exclude -fast variant from base comparison
       const baseId = bestOpus.id.replace(/-fast$/, '');
-      const currentBase = MODELS.chat.replace(/-fast$/, '');
+      const currentBase = MODELS.chat_heavy.replace(/-fast$/, '');
 
       if (baseId !== currentBase) {
-        const oldModel = MODELS.chat;
+        const oldModel = MODELS.chat_heavy;
         const fastVariant = models.find(m => m.id === `${baseId}-fast`);
         const fastId = fastVariant ? fastVariant.id : baseId;
 
@@ -564,8 +575,7 @@ async function checkLatestModels() {
         }
         console.log(`[modelRouter] ✅ ${baseId} passed all 3 compatibility tests.`);
 
-        // Hot-swap all model slots
-        MODELS.chat = baseId;
+        // Hot-swap premium model slots only.
         MODELS.chat_heavy = baseId;
         MODELS.chat_heavy_fast = fastId;
         MODELS.coder = baseId;

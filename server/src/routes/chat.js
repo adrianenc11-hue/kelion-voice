@@ -164,18 +164,33 @@ router.post('/', async (req, res) => {
     const canUsePremium = isAdmin || (Number(creditsBalance) >= PREMIUM_CREDITS_THRESHOLD);
     // ── Cost Guard ───────────────────────────────────────────────────────────
     const budget = checkBudget();
-    // Adrian 2026-05-18: "revenire dupa incarcare credit la varianta maxima"
-    // If the global server budget is blocked, we normally force the light model.
-    // However, if the user has purchased credits (balance > 0), they bypass the global
-    // block and get the premium model they paid for.
-    const hasPaidCredits = !isAdmin && Number(creditsBalance) > 0;
-    const isGlobalBlocked = budget.blocked && !hasPaidCredits;
+    const costGuardEnforced = process.env.AI_COST_GUARD_ENFORCE !== 'false';
+    const adminBudgetBypass = process.env.AI_COST_GUARD_ADMIN_BYPASS === '1';
+    const isBudgetBlocked = budget.blocked && costGuardEnforced && !(isAdmin && adminBudgetBypass);
+
+    if (isBudgetBlocked) {
+      console.warn(`[chat] Daily AI budget HARD CAP reached ($${budget.dailyCost.toFixed(2)} / $${budget.hardCap}). Blocking before provider call.`);
+      return res.status(429).json({
+        code: 'AI_COST_HARD_CAP_REACHED',
+        error: isAdmin
+          ? `AI cost guard: hard cap atins ($${budget.dailyCost.toFixed(2)} / $${budget.hardCap}). Request oprit inainte de OpenRouter ca sa nu mai consume credit.`
+          : 'AI usage is temporarily paused. Please try again later.',
+        dailyCost: Number(budget.dailyCost.toFixed(4)),
+        remaining: Number(budget.remaining.toFixed(4)),
+        hardCap: budget.hardCap,
+      });
+    }
+
+    const isGlobalBlocked = budget.blocked;
     
     if (isGlobalBlocked && (codingTask || complexTask)) {
       console.warn(`[chat] Daily AI budget HARD CAP reached ($${budget.dailyCost.toFixed(2)}). Forcing light model.`);
     }
 
     let isHeavy = (codingTask || complexTask) && canUsePremium && !isGlobalBlocked;
+    if (budget.warning) {
+      isHeavy = false;
+    }
     // Adrian: "Să lucreze cu agenți la orice task mai complex".
     // Lowering threshold to 150 chars and adding more keywords.
     const isSoftGreu = false; // Disabled to force frontend tool execution for live progress
@@ -195,10 +210,10 @@ router.post('/', async (req, res) => {
     }
 
     // ── Tandem Mode (dual-brain) ───────────────────────────────────────────────────────
-    // When TANDEM_ENABLED=1, heavy tasks run Opus 4.7 + Kimi K2.6 in parallel.
-    // Primary (Opus) is returned; secondary (Kimi) is logged for comparison.
+    // When TANDEM_ENABLED=1, heavy tasks run a Claude-only second pass in parallel.
+    // It stays disabled by default because tandem doubles model spend.
     const TANDEM_ENABLED = process.env.TANDEM_ENABLED === '1';
-    const useTandem = TANDEM_ENABLED && isHeavy;
+    const useTandem = TANDEM_ENABLED && isHeavy && !budget.warning;
 
     const browserLang = (req.query.lang || 'en-US').toString().slice(0, 16);
     const forcedLang = (process.env.KELION_FORCE_LANG || browserLang).toString().slice(0, 16);
