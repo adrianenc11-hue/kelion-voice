@@ -89,32 +89,8 @@ function Loader() {
   )
 }
 
-const PermanentLogo = () => (
-  <div style={{
-    position: 'fixed',
-    bottom: '20px',
-    right: '20px',
-    zIndex: 9999,
-    display: 'flex',
-    alignItems: 'center',
-    gap: '10px',
-    pointerEvents: 'none',
-    opacity: 0.95,
-    background: 'rgba(0,0,0,0.6)',
-    padding: '8px 16px',
-    borderRadius: '12px',
-    backdropFilter: 'blur(8px)',
-    border: '1px solid rgba(255, 215, 0, 0.3)',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.5)'
-  }}>
-    <img src="/ae_studio_logo_gold.png" alt="AE Studio Gold" style={{ height: '32px', filter: 'drop-shadow(0 0 8px rgba(255, 215, 0, 0.4))' }} />
-    <span style={{ color: '#ffd700', fontFamily: 'system-ui, sans-serif', fontSize: '14px', fontWeight: 'bold', letterSpacing: '0.1em', textTransform: 'uppercase' }}>AE Studio</span>
-  </div>
-);
-
 const GlobalOverlays = () => (
   <>
-    <PermanentLogo />
     <TaskStatusPanel />
   </>
 )
