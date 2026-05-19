@@ -8,6 +8,7 @@ const CAPABILITY_NAMES = {
   shell: ['AGENT_ENABLED', 'AGENT_SHELL_CWD'],
   persistence: ['DATABASE_URL (Postgres)', 'Secrets'],
   research: ['Google Search (Agent)'],
+  tools: ['Tool Catalog'],
 };
 
 const ACTIONS = {
@@ -24,6 +25,13 @@ const ACTIONS = {
 function _resultMap(audit) {
   const map = new Map();
   for (const r of audit?.results || []) map.set(r.name, r);
+  if (audit?.toolAudit) {
+    map.set('Tool Catalog', {
+      name: 'Tool Catalog',
+      ok: audit.toolAudit.ready === true,
+      error: audit.toolAudit.ready ? null : audit.toolAudit.summary,
+    });
+  }
   return map;
 }
 
@@ -51,6 +59,7 @@ function buildAutonomyStatus(audit, options = {}) {
     shellWorkspace: _ok(map, CAPABILITY_NAMES.shell),
     durableState: _ok(map, CAPABILITY_NAMES.persistence),
     webResearch: _ok(map, CAPABILITY_NAMES.research),
+    toolCatalog: _ok(map, CAPABILITY_NAMES.tools),
   };
   const blockers = [
     ..._missing(map, CAPABILITY_NAMES.models),
@@ -58,6 +67,7 @@ function buildAutonomyStatus(audit, options = {}) {
     ..._missing(map, CAPABILITY_NAMES.shell),
     ..._missing(map, CAPABILITY_NAMES.persistence),
     ..._missing(map, CAPABILITY_NAMES.research),
+    ..._missing(map, CAPABILITY_NAMES.tools),
   ];
   const ready = blockers.length === 0;
   const mode = ready ? 'ready' : (allowDegraded ? 'degraded' : 'blocked');
@@ -68,8 +78,13 @@ function buildAutonomyStatus(audit, options = {}) {
     mode,
     canStart: ready || allowDegraded,
     canCommit: capabilities.shellWorkspace,
-    canOpenPr: capabilities.gitPrWorkflow && capabilities.shellWorkspace,
+    canOpenPr: capabilities.gitPrWorkflow && capabilities.shellWorkspace && capabilities.toolCatalog,
     canMerge: process.env.AGENT_ALLOW_PR_MERGE === '1' && capabilities.gitPrWorkflow,
+    humanDecisionRequired: [
+      'merge_to_master',
+      'provider_or_budget_change',
+      'destructive_project_delete',
+    ],
     allowDegraded,
     capabilities,
     blockers,

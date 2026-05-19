@@ -12,6 +12,7 @@ const names = [
   'DATABASE_URL (Postgres)',
   'Secrets',
   'Google Search (Agent)',
+  'Tool Catalog',
 ];
 
 function audit(okNames = []) {
@@ -25,6 +26,10 @@ function audit(okNames = []) {
   const blockers = results.filter(r => !r.ok).map(r => ({ name: r.name, error: r.error }));
   return {
     results,
+    toolAudit: {
+      ready: ok.has('Tool Catalog'),
+      summary: ok.has('Tool Catalog') ? 'Tool audit ready.' : 'Tool audit blocked.',
+    },
     allOk: blockers.length === 0,
     fail: blockers.length,
     total: results.length,
@@ -79,6 +84,7 @@ describe('autonomySupervisor', () => {
       shellWorkspace: true,
       durableState: true,
       webResearch: true,
+      toolCatalog: true,
     });
   });
 

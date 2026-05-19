@@ -2,6 +2,7 @@ process.env.NODE_ENV = 'test';
 
 const { KELION_TOOLS } = require('../src/routes/realtime');
 const { REAL_TOOL_NAMES, ADMIN_ONLY_TOOLS, executeRealTool } = require('../src/services/realTools');
+const { runToolAudit } = require('../src/services/toolAudit');
 
 const CLIENT_ONLY_TOOLS = new Set([
   'observe_user_emotion',
@@ -28,6 +29,11 @@ const DANGEROUS_SERVER_TOOLS = [
   'learn_new_skill',
   'verify_build',
   'diff_edit',
+  'mcp_protocol',
+  'parallel_tools',
+  'task_orchestrator',
+  'universal_executor',
+  'system_bridge',
 ];
 
 describe('Kelion tool catalog sync', () => {
@@ -50,6 +56,18 @@ describe('Kelion tool catalog sync', () => {
       expect(REAL_TOOL_NAMES).toContain(name);
       expect(ADMIN_ONLY_TOOLS.has(name)).toBe(true);
     }
+  });
+
+  test('tool self-audit is ready and keeps human decisions explicit', () => {
+    const audit = runToolAudit();
+
+    expect(audit.ready).toBe(true);
+    expect(audit.blockers).toEqual([]);
+    expect(audit.humanDecisionGates.map(g => g.name)).toEqual([
+      'merge_to_master',
+      'provider_or_budget_change',
+      'destructive_project_delete',
+    ]);
   });
 
   test('previously rejected audit tools now dispatch instead of returning null', async () => {
