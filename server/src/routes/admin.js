@@ -119,6 +119,36 @@ function serializeAdminUser(u, balance, payment = {}) {
   };
 }
 
+function serializeCreditTransaction(tx) {
+  const amountCents = Number(tx.amount_cents || 0);
+  const deltaMinutes = Number(tx.delta_minutes || 0);
+  return {
+    id: tx.id,
+    user_id: tx.user_id,
+    userId: tx.user_id,
+    user_email: tx.user_email || null,
+    userEmail: tx.user_email || null,
+    email: tx.user_email || null,
+    user_name: tx.user_name || null,
+    userName: tx.user_name || null,
+    delta_minutes: deltaMinutes,
+    deltaMinutes,
+    minutes: deltaMinutes,
+    amount_cents: amountCents,
+    amountCents,
+    currency: tx.currency || 'gbp',
+    kind: tx.kind,
+    type: tx.kind,
+    stripe_session_id: tx.stripe_session_id || null,
+    stripeSessionId: tx.stripe_session_id || null,
+    note: tx.note || null,
+    created_at: tx.created_at,
+    createdAt: tx.created_at,
+    user_balance: tx.user_balance,
+    userBalance: tx.user_balance,
+  };
+}
+
 /**
  * GET /api/admin/business
  * Live business-health snapshot: credit top-up revenue (from ledger) and
@@ -200,7 +230,7 @@ router.get('/credits/ledger', async (req, res) => {
     const kind = req.query.kind ? String(req.query.kind) : null;
     const sinceMs = req.query.sinceMs ? Number(req.query.sinceMs) : null;
     const rows = await listRecentCreditTransactions({ limit, kind, sinceMs });
-    res.json({ rows, ts: new Date().toISOString() });
+    res.json({ rows: rows.map(serializeCreditTransaction), ts: new Date().toISOString() });
   } catch (err) {
     console.error('[admin/credits/ledger] Error:', err && err.message);
     res.status(500).json({ error: 'Failed to load credit ledger' });
