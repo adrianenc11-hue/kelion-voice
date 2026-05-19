@@ -7,6 +7,7 @@ const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
 const { runToolAudit } = require('./toolAudit');
+const agentRepo = require('./agentRepo');
 
 function fetchJson(url, opts = {}) {
   return new Promise((resolve) => {
@@ -125,18 +126,18 @@ async function checkAgentEnabled() {
 
 async function checkAgentShellCwd() {
   const raw = process.env.AGENT_SHELL_CWD;
-  const resolved = raw ? path.resolve(raw) : process.cwd();
+  const autoRepo = agentRepo.ensureAgentRepoSync({ requestedCwd: raw || process.cwd() });
+  const resolved = autoRepo.ok && autoRepo.cwd ? autoRepo.cwd : (raw ? path.resolve(raw) : process.cwd());
   const exists = fs.existsSync(resolved);
   const hasPackage = exists && fs.existsSync(path.join(resolved, 'package.json'));
   const hasGit = exists && fs.existsSync(path.join(resolved, '.git'));
   return {
     name: 'AGENT_SHELL_CWD',
-    ok: !!raw && exists && hasPackage && hasGit,
+    ok: exists && hasPackage && hasGit,
     requiredForAutonomy: true,
-    value: raw ? resolved : 'not set',
-    error: !raw
-      ? 'Must be set explicitly to the repo root before AGENT_ENABLED=1'
-      : (!exists
+    value: raw ? resolved : `${resolved} (auto)`,
+    mode: raw ? 'configured' : 'auto',
+    error: (!exists
         ? 'Path does not exist'
         : (!hasPackage
           ? 'Path does not look like the repo root (package.json missing)'
