@@ -1,22 +1,21 @@
-// TaskStatusPanel — real-time overlay showing what Kelion is doing.
-// Shows: tool name, file path, animated progress bar 0→100%, status label.
-// Positioned bottom-left, floats above the chat input.
+// TaskStatusPanel - private work indicator.
+// Tool names, file paths, and step narration are intentionally hidden.
 
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { subscribeTaskStatus } from '../lib/taskStatusStore'
 
 const PHASE_COLORS = {
-  thinking: '#a78bfa',  // purple
-  working:  '#60a5fa',  // blue
-  done:     '#4ade80',  // green
-  error:    '#f87171',  // red
+  thinking: '#a78bfa',
+  working: '#60a5fa',
+  done: '#4ade80',
+  error: '#f87171',
 }
 
 const PHASE_ICONS = {
-  thinking: '⏳',
-  working:  '⏳',
-  done:     '✓',
-  error:    '!',
+  thinking: '\u23F3',
+  working: '\u23F3',
+  done: '\u2713',
+  error: '!',
 }
 
 export default function TaskStatusPanel() {
@@ -28,7 +27,6 @@ export default function TaskStatusPanel() {
     const unsub = subscribeTaskStatus((s) => {
       setStatus(s)
       if (s && s.phase !== 'done' && s.phase !== 'error') {
-        // Start elapsed timer
         if (!timerRef.current) {
           timerRef.current = setInterval(() => {
             setElapsed(prev => prev + 1)
@@ -48,20 +46,21 @@ export default function TaskStatusPanel() {
     }
   }, [])
 
-  // Reset elapsed when a new task starts
   useEffect(() => {
     if (status?.startedAt) {
       setElapsed(Math.round((Date.now() - status.startedAt) / 1000))
     }
-  }, [status?.tool, status?.startedAt])
+  }, [status?.startedAt])
 
   if (!status) return null
 
   const color = PHASE_COLORS[status.phase] || PHASE_COLORS.working
-  const icon = PHASE_ICONS[status.phase] || '⏳'
-  const progress = status.progress || 0
+  const icon = PHASE_ICONS[status.phase] || PHASE_ICONS.working
+  const progress = Math.max(0, Math.min(100, status.progress || 0))
   const isDone = status.phase === 'done'
   const isError = status.phase === 'error'
+  const title = isDone ? 'Gata' : isError ? 'Eroare' : 'Kelion lucreaza...'
+  const detail = isError ? (status.label || 'Eroare') : 'Execut task-ul in fundal.'
 
   return (
     <div style={{
@@ -113,7 +112,6 @@ export default function TaskStatusPanel() {
         }
       `}</style>
 
-      {/* Header: icon + generic task status + elapsed */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span style={{
@@ -128,7 +126,7 @@ export default function TaskStatusPanel() {
             letterSpacing: '0.5px',
             textTransform: 'uppercase',
           }}>
-            {status.label || 'Kelion lucreaza...'}
+            {title}
           </span>
         </div>
         <span style={{ fontSize: 11, color: '#8b8b9e', fontVariantNumeric: 'tabular-nums' }}>
@@ -136,35 +134,15 @@ export default function TaskStatusPanel() {
         </span>
       </div>
 
-      {/* File path */}
-      {status.file && (
-        <div style={{
-          fontSize: 11,
-          color: '#a78bfa',
-          marginBottom: 8,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-          padding: '4px 8px',
-          background: 'rgba(167, 139, 250, 0.08)',
-          borderRadius: 6,
-          fontFamily: "'Consolas', 'Fira Code', monospace",
-        }}>
-          📄 {status.file}
-        </div>
-      )}
-
-      {/* Status label */}
       <div style={{
         fontSize: 12,
         color: '#c4b5fd',
         marginBottom: 10,
         animation: status.phase === 'working' ? 'progressPulse 1.5s infinite' : 'none',
       }}>
-        {status.label}
+        {detail}
       </div>
 
-      {/* Progress bar */}
       <div style={{
         width: '100%',
         height: 8,
@@ -190,7 +168,6 @@ export default function TaskStatusPanel() {
         }} />
       </div>
 
-      {/* Progress percentage */}
       <div style={{
         display: 'flex',
         justifyContent: 'flex-end',
