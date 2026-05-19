@@ -194,6 +194,25 @@ CREATE TABLE IF NOT EXISTS action_history (
 CREATE INDEX IF NOT EXISTS idx_action_history_user    ON action_history(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_action_history_session ON action_history(user_id, session_id, created_at DESC);
 
+CREATE TABLE IF NOT EXISTS brain_events (
+  id          BIGSERIAL PRIMARY KEY,
+  user_id     BIGINT REFERENCES users(id) ON DELETE SET NULL,
+  session_id  TEXT,
+  source      TEXT NOT NULL,
+  kind        TEXT NOT NULL,
+  summary     TEXT NOT NULL,
+  payload     TEXT,
+  task_id     BIGINT,
+  ok          INTEGER NOT NULL DEFAULT 1,
+  created_at  TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_brain_events_user
+  ON brain_events(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_brain_events_session
+  ON brain_events(session_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_brain_events_task
+  ON brain_events(task_id, created_at DESC);
+
 CREATE TABLE IF NOT EXISTS visitor_events (
   id          BIGSERIAL PRIMARY KEY,
   ts          TIMESTAMPTZ DEFAULT CURRENT_TIMESTAMP,

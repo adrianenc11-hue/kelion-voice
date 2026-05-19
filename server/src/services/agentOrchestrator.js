@@ -141,6 +141,7 @@ const MAX_STEPS = 20;
 const MAX_REPAIR_ITERATIONS = 3;
 /** @const {number} Maximum autonomy loop iterations (re-plan after completion assessment). */
 const MAX_AUTONOMY_ITERATIONS = 5;
+const brainBus = require('./brainBus');
 
 /**
  * Normalise and validate a file path against the blocklist.
@@ -183,6 +184,18 @@ async function _saveState(taskId, state) {
       backups: state.backups,
       approved_commit: state.approvedCommit || false,
       approved_push: state.approvedPush || false,
+    });
+    await brainBus.emit({
+      source: 'agent_orchestrator',
+      kind: 'state_saved',
+      summary: `Task ${taskId} status=${state.status}${state.prUrl ? ` PR=${state.prUrl}` : ''}`,
+      taskId,
+      ok: state.status !== 'failed' && state.status !== 'blocked',
+      payload: {
+        status: state.status,
+        modifiedPaths: Array.from(state.modifiedPaths || []),
+        prUrl: state.prUrl || null,
+      },
     });
     return { ok: true };
   } catch (err) {

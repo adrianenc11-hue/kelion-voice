@@ -3,6 +3,7 @@
 const agentTasks = require('./agentTasks');
 const agentOrchestrator = require('./agentOrchestrator');
 const autonomySupervisor = require('./autonomySupervisor');
+const brainBus = require('./brainBus');
 
 const DEFAULT_INTERVAL_MS = 30_000;
 const DEFAULT_BATCH_SIZE = 1;
@@ -70,6 +71,11 @@ async function tick() {
     const tasks = runnable.tasks || [];
     if (!tasks.length) {
       state.lastResult = { ok: true, processed: 0, reason: 'no_runnable_tasks' };
+      await brainBus.emit({
+        source: 'agent_worker',
+        kind: 'tick_idle',
+        summary: 'Agent worker tick found no runnable tasks',
+      });
       return state.lastResult;
     }
 
@@ -89,6 +95,13 @@ async function tick() {
         blocked: tasks.length,
         error: preflight.reason || preflight.error || 'Autonomy preflight failed',
       };
+      await brainBus.emit({
+        source: 'agent_worker',
+        kind: 'preflight_blocked',
+        summary: state.lastResult.error,
+        payload: { blocked: tasks.length },
+        ok: false,
+      });
       return state.lastResult;
     }
 
@@ -105,6 +118,14 @@ async function tick() {
         autonomous: true,
         autonomyStatus: preflight.status,
       });
+      await brainBus.emit({
+        source: 'agent_worker',
+        kind: 'task_finished',
+        summary: `Task ${task.id} ${result.ok ? 'completed' : 'failed'}: ${result.status || result.error || 'done'}`,
+        taskId: task.id,
+        ok: result.ok !== false,
+        payload: { title: task.title, status: result.status, prUrl: result.prUrl },
+      });
       results.push({ taskId: task.id, ...result });
       state.processed += 1;
       state.lastRunAt = new Date().toISOString();
@@ -114,10 +135,22 @@ async function tick() {
     await Promise.all(Array.from({ length: Math.min(concurrency, tasks.length) }, () => runNext()));
 
     state.lastResult = { ok: true, processed: results.length, results };
+    await brainBus.emit({
+      source: 'agent_worker',
+      kind: 'tick_done',
+      summary: `Agent worker processed ${results.length} task(s)`,
+      payload: { processed: results.length, concurrency },
+    });
     return state.lastResult;
   } catch (err) {
     state.lastError = err && err.message ? err.message : String(err);
     state.lastResult = { ok: false, error: state.lastError };
+    await brainBus.emit({
+      source: 'agent_worker',
+      kind: 'tick_error',
+      summary: state.lastError,
+      ok: false,
+    });
     console.error('[agentWorker] tick failed:', state.lastError);
     return state.lastResult;
   } finally {

@@ -152,6 +152,7 @@ function buildKelionPersona(opts = {}) {
     lockedLangTag = null,
     clientTz = null,
     clientLocalTime = null,
+    brainContext = '',
   } = opts;
 
   // ── Model identity — so Kelion knows what brain it's running on ──
@@ -241,7 +242,7 @@ Silent tools (no response): observe_user_emotion, learn_from_observation, get_ac
 Tools:
 ${KELION_TOOLS.map(t => `${t.name}(${t.required.join(',')})—${t.description.split('.')[0]}`).join('\n')}
 Also: Google Search, Code Execution, Maps, URL Context (built-in).
-Context: ${localTime} (${weekday}, ${tz}).${locationLine ? ` GPS: ${locationLine}.` : ''}${coordLine ? ` ${coordLine}` : ''}${noGpsLine ? ` ${noGpsLine}` : ''}${user ? `\nUser: ${user.name || 'friend'}${user.id != null ? ` (id ${user.id})` : ''}` : ''}${creditsBalance !== null ? `\nBalance: ${creditsBalance} min.` : ''}${formatMemoryBlocks(memoryItems)}${buildPriorTurnsBlock(priorTurns)}`;
+Context: ${localTime} (${weekday}, ${tz}).${locationLine ? ` GPS: ${locationLine}.` : ''}${coordLine ? ` ${coordLine}` : ''}${noGpsLine ? ` ${noGpsLine}` : ''}${user ? `\nUser: ${user.name || 'friend'}${user.id != null ? ` (id ${user.id})` : ''}` : ''}${creditsBalance !== null ? `\nBalance: ${creditsBalance} min.` : ''}${formatMemoryBlocks(memoryItems)}${brainContext || ''}${buildPriorTurnsBlock(priorTurns)}`;
 }
 
 // Audit M9 — partition memory items by subject before rendering them into
@@ -1619,6 +1620,17 @@ const voiceTokenHandler = async (req, res) => {
     } catch (err) {
       console.warn('[realtime] failed to fetch user facts', err.message);
     }
+    let brainContext = '';
+    try {
+      const brainBus = require('../services/brainBus');
+      brainContext = await brainBus.recentBrainContext({ userId: user?.id, limit: 8 });
+      await brainBus.emit({
+        userId: user?.id,
+        source: 'live',
+        kind: 'session_start',
+        summary: `Voice/live session started on ${chatModel}`,
+      });
+    } catch (_) {}
 
     const modelFamily = chatModel.includes('claude') ? 'Claude (Anthropic)'
       : chatModel.includes('gemini') ? 'Gemini (Google)'
@@ -1636,6 +1648,7 @@ const voiceTokenHandler = async (req, res) => {
       signedIn: !!user,
       userName: user?.name || null,
       memoryCount: memoryItems.length,
+      brainContextCount: brainContext ? 1 : 0,
       voiceStyle: voiceStyle.label,
       setup: null,
       trial,
@@ -1849,8 +1862,21 @@ router.post('/pipeline', async (req, res) => {
       try { creditsBalance = await getCreditsBalance(user.id); }
       catch (_) { }
     }
+    const brainBus = require('../services/brainBus');
+    let brainContext = '';
+    try {
+      brainContext = await brainBus.recentBrainContext({ userId: user?.id, limit: 10 });
+      await brainBus.emit({
+        userId: user?.id,
+        source: 'live_pipeline',
+        kind: 'user_message',
+        summary: userText,
+        payload: { hasVisionContext: !!visionContext },
+      });
+    } catch (_) {}
     const systemPrompt = buildKelionPersona({
       user, creditsBalance, memoryItems, voiceStyle, geo: ipGeoData, priorTurns: [],
+      brainContext,
       lockedLangTag: await resolveLockedLangTag({ req, user, forcedLang }),
       clientTz,
       clientLocalTime: clientLT,
@@ -1937,6 +1963,15 @@ router.post('/pipeline', async (req, res) => {
         let args = {};
         try { args = JSON.parse(fc.function?.arguments || '{}'); } catch (e) { }
         toolCalls.push({ name, args });
+        try {
+          await brainBus.emit({
+            userId: user?.id,
+            source: 'live_pipeline',
+            kind: 'tool_call',
+            summary: `Live pipeline called ${name}`,
+            payload: { args },
+          });
+        } catch (_) {}
 
         let toolResult = { status: 'tool_not_found' };
         try {
@@ -1984,6 +2019,15 @@ router.post('/pipeline', async (req, res) => {
       assistantText = "[SISTEM: Modelul principal nu a raspuns. Am trecut automat pe modelul de rezerva.]\n" + assistantText;
     }
     console.log('[pipeline] OpenRouter:', assistantText.slice(0, 100));
+    try {
+      await brainBus.emit({
+        userId: user?.id,
+        source: 'live_pipeline',
+        kind: 'assistant_reply',
+        summary: assistantText,
+        payload: { toolCalls: toolCalls.map(t => t.name) },
+      });
+    } catch (_) {}
 
     return res.json({
       ok: true,

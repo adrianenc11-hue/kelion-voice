@@ -132,6 +132,21 @@ router.post('/:id/messages', async (req, res) => {
       const row = await appendConversationMessage(req.user.id, id, m.role, m.content);
       if (row) saved.push(row);
     }
+    if (saved.length) {
+      try {
+        const brainBus = require('../services/brainBus');
+        for (const row of saved) {
+          await brainBus.emit({
+            userId: req.user.id,
+            sessionId: `conversation:${id}`,
+            source: 'history',
+            kind: `message_${row.role || 'unknown'}`,
+            summary: row.content,
+            payload: { conversationId: id, messageId: row.id },
+          });
+        }
+      } catch (_) {}
+    }
     if (saved.length === 0) {
       // Either conversation not found / not owned, or content was empty.
       return res.status(404).json({ error: 'not found' });
