@@ -1941,6 +1941,7 @@ router.post('/pipeline', async (req, res) => {
     }
 
     const toolCalls = [];
+    const toolResponses = [];
     let rounds = 0;
 
     // Tool call loop (up to 3 rounds)
@@ -1985,6 +1986,7 @@ router.post('/pipeline', async (req, res) => {
         } catch (err) {
           toolResult = { error: err.message };
         }
+        toolResponses.push({ name, response: toolResult });
 
         if (toolResult?.ok === false || toolResult?.error) {
           toolResult._hint = "SYSTEM: This tool call failed. Analyze the error, correct your arguments, and try again, or use an alternative approach. Do not give up immediately.";
@@ -2015,6 +2017,12 @@ router.post('/pipeline', async (req, res) => {
     const finalMessage = result.choices?.[0]?.message;
     // Extract final text — only return .content (ignore any reasoning_content from CoT models)
     let assistantText = (finalMessage?.content || '').trim();
+    const { guardReply } = require('../services/truthGuard');
+    const guarded = guardReply({ reply: assistantText, toolResponses, model: preferredModel });
+    assistantText = guarded.reply;
+    if (guarded.changed) {
+      console.warn('[truthGuard] blocked unverified live action claim:', guarded.reason);
+    }
     if (fallbackTriggered) {
       assistantText = "[SISTEM: Modelul principal nu a raspuns. Am trecut automat pe modelul de rezerva.]\n" + assistantText;
     }
@@ -2025,7 +2033,7 @@ router.post('/pipeline', async (req, res) => {
         source: 'live_pipeline',
         kind: 'assistant_reply',
         summary: assistantText,
-        payload: { toolCalls: toolCalls.map(t => t.name) },
+        payload: { toolCalls: toolCalls.map(t => t.name), truthGuard: guarded.changed ? guarded.reason : null },
       });
     } catch (_) {}
 
@@ -2036,6 +2044,7 @@ router.post('/pipeline', async (req, res) => {
       audio: null,
       audioFormat: null,
       toolCalls,
+      truthGuard: guarded.changed ? { reason: guarded.reason, evidence: guarded.evidence } : undefined,
     });
 
   } catch (err) {
