@@ -3833,7 +3833,7 @@ async function executeRealTool(name, args, ctx) {
     case 'ocr_engine': return toolOcrEngine(a);
     case 'image_generator_editor': return toolImageGeneratorEditor(a);
     case 'hardware_manager': return toolHardwareManager(a);
-    case 'cloud_manager': return toolCloudManager(a);
+    case 'cloud_manager': return toolCloudManager(a, ctx);
     case 'communication_hub': return toolCommunicationHub(a);
     case 'automation_engine': return toolAutomationEngine(a);
     case 'devops_toolkit': return toolDevopsToolkit(a);
@@ -4818,9 +4818,16 @@ async function toolRunAgentEval(args) {
 
 // 0.3B — spice_simulate: Simulate electronic circuits (SPICE netlist + solver).
 async function toolSpiceSimulate(args) {
-  const components = Array.isArray(args?.components) ? args.components : [];
-  const analysis = args?.analysis || { type: 'dc' };
-  const probes = Array.isArray(args?.probes) ? args.probes : [];
+  const parsedComponents = _parseJsonArrayArg(args?.components, 'components');
+  if (!parsedComponents.ok) return parsedComponents;
+  const parsedAnalysis = _parseJsonObjectArg(args?.analysis, 'analysis', { type: 'dc' });
+  if (!parsedAnalysis.ok) return parsedAnalysis;
+  const parsedProbes = _parseJsonArrayArg(args?.probes, 'probes', []);
+  if (!parsedProbes.ok) return parsedProbes;
+
+  const components = parsedComponents.value;
+  const analysis = parsedAnalysis.value;
+  const probes = parsedProbes.value;
   if (!components.length) return { ok: false, error: 'components array is required' };
 
   // Build SPICE netlist
@@ -4874,6 +4881,32 @@ async function toolSpiceSimulate(args) {
     used_solver: usedSolver,
     results,
   };
+}
+
+function _parseJsonArrayArg(value, field, fallback) {
+  if (value == null && fallback !== undefined) return { ok: true, value: fallback };
+  if (Array.isArray(value)) return { ok: true, value };
+  if (typeof value !== 'string') return { ok: true, value: [] };
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) return { ok: true, value: parsed };
+    return { ok: false, error: `${field} must be a JSON array` };
+  } catch (err) {
+    return { ok: false, error: `${field} is not valid JSON: ${err.message}` };
+  }
+}
+
+function _parseJsonObjectArg(value, field, fallback) {
+  if (value == null) return { ok: true, value: fallback };
+  if (typeof value === 'object' && !Array.isArray(value)) return { ok: true, value };
+  if (typeof value !== 'string') return { ok: true, value: fallback };
+  try {
+    const parsed = JSON.parse(value);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) return { ok: true, value: parsed };
+    return { ok: false, error: `${field} must be a JSON object` };
+  } catch (err) {
+    return { ok: false, error: `${field} is not valid JSON: ${err.message}` };
+  }
 }
 
 // Simple DC solver for passive circuits (R + ideal V/I sources)
@@ -5373,12 +5406,38 @@ async function toolSystemBridge(args) {
 
 // 0.23A — hardware_manager: Super-module for hardware control.
 async function toolHardwareManager(args) {
-  return { ok: true, client_action: 'hardware_manager', instruction: 'The client will handle the hardware configuration for ' + (args?.device || 'unknown') };
+  return {
+    ok: false,
+    unavailable: true,
+    device: args?.device || 'unknown',
+    error: 'Hardware control requires a native desktop bridge. Browser camera and location tools are available separately.',
+  };
 }
 
 // 0.24A — cloud_manager: Super-module for cloud storage.
-async function toolCloudManager(args) {
-  return { ok: true, client_action: 'cloud_manager', instruction: 'Cloud interaction requires MCP OAuth context on the client for ' + (args?.provider || 'unknown') };
+async function toolCloudManager(args, ctx) {
+  const action = String(args?.action || 'list').trim().toLowerCase();
+  const provider = String(args?.provider || 'gdrive').trim().toLowerCase();
+  if (!['gdrive', 'google', 'google_drive'].includes(provider)) {
+    return {
+      ok: false,
+      unavailable: true,
+      provider,
+      error: 'Only Google Drive search/list is wired on this deployment. Dropbox and OneDrive are not connected.',
+    };
+  }
+  if (action === 'list' || action === 'read' || action === 'search') {
+    return toolSearchFiles({ query: args?.path || args?.query || '', limit: args?.limit || 10 }, ctx);
+  }
+  if (action === 'write') {
+    return {
+      ok: false,
+      unavailable: true,
+      provider,
+      error: 'Google Drive write is not enabled on this deployment; only search/list is available.',
+    };
+  }
+  return { ok: false, error: 'Unknown cloud_manager action. Use list, read/search, or write.' };
 }
 
 // 0.25A — communication_hub: Super-module for Email/SMS.
@@ -5413,14 +5472,14 @@ async function toolSchedulerPro(args, ctx) {
   const action = String(args?.action || '').trim().toLowerCase();
   if (action === 'read_calendar') return toolReadCalendar(args, ctx);
   if (action === 'create_ics') return toolCreateCalendarIcs(args);
-  if (action === 'schedule_task') return toolScheduledTask(args, ctx);
+  if (action === 'schedule_task') return toolScheduledTask({ ...args, description: args?.description ?? args?.query }, ctx);
   if (action === 'plan_tasks') return toolTaskPlanner(args, ctx);
   return { ok: false, error: 'Unknown scheduler_pro action.' };
 }
 
 // 0.29A — smart_monitor: Super-module for alerts and monitoring.
 async function toolSmartMonitor(args, ctx) {
-  return toolSmartAlert(args, ctx);
+  return toolSmartAlert({ ...args, message: args?.message ?? args?.action_to_take }, ctx);
 }
 
 // 0.30A — deep_memory_architect: Super-module for memory and context.
@@ -5438,7 +5497,7 @@ async function toolDeepMemoryArchitect(args, ctx) {
 async function toolTaskOrchestrator(args, ctx) {
   const action = String(args?.action || '').trim().toLowerCase();
   if (action === 'parallel') return toolParallelTools(args, ctx);
-  if (action === 'execute_plan') return toolExecutePlan(args, ctx);
+  if (action === 'execute_plan') return toolExecutePlan({ ...args, steps: args?.steps ?? args?.plan }, ctx);
   return { ok: false, error: 'Unknown task_orchestrator action.' };
 }
 
@@ -5665,6 +5724,7 @@ const REAL_TOOL_NAMES = [
   'read_local_file', 'list_local_files', 'edit_local_file',
   'search_codebase', 'replace_in_file',
   'create_github_pr', 'manage_github_prs',
+  'commit_and_push_to_github',
   'ask_expert_coder', 'fetch_documentation', 'browse_web',
   'execute_plan',
   // Silent vision auto-learn
@@ -5674,7 +5734,9 @@ const REAL_TOOL_NAMES = [
   // ── Position 0 — Super LLM capabilities ──
   'query_database', 'check_updates', 'conversation_summary',
   'thinking_mode', 'deep_search', 'memory_sources', 'self_verify', 'data_visualize',
-  'computer_use', 'auto_test', 'session_persist', 'parallel_tools',
+  'computer_use', 'auto_test', 'run_agent_eval', 'spice_simulate',
+  'auto_install_dependency', 'learn_new_skill', 'self_evaluate',
+  'auto_update_dependencies', 'session_persist', 'parallel_tools',
   'video_analyze', 'audio_analyze', 'image_edit', 'spreadsheet_analyze',
   'vision_analyze', 'screen_capture', 'task_planner', 'clipboard_manager',
   'context_cache', 'mcp_protocol', 'scheduled_task', 'qr_code', 'smart_alert',
@@ -5684,6 +5746,10 @@ const REAL_TOOL_NAMES = [
   'scheduler_pro', 'smart_monitor', 'deep_memory_architect', 'task_orchestrator', 'universal_executor',
   // Voice clone library
   'list_voice_clones', 'activate_voice_clone',
+  // Agent coding/user file tools
+  'verify_build', 'diff_edit',
+  'upload_file', 'list_user_files', 'download_file', 'delete_file',
+  'generate_mobile_app',
   // Song identification
   'identify_song',
   // Past conversation reading
@@ -5710,7 +5776,9 @@ const ADMIN_ONLY_TOOLS = new Set([
   // Database direct access
   'query_database',
   // Process management / npm
-  'check_updates', 'auto_test',
+  'check_updates', 'auto_test', 'run_agent_eval', 'self_evaluate',
+  'auto_install_dependency', 'auto_update_dependencies', 'learn_new_skill',
+  'verify_build', 'diff_edit',
   // Catch-all "do anything" tools
   'computer_use', 'system_bridge', 'universal_executor',
   'automation_engine', 'devops_toolkit',
