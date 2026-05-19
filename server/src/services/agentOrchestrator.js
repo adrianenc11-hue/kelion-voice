@@ -208,6 +208,18 @@ async function _saveState(taskId, state) {
         prUrl: state.prUrl || null,
       },
     });
+    await brainBus.emit({
+      source: 'agent_orchestrator',
+      kind: 'state_saved',
+      summary: `Task ${taskId} status=${state.status}${state.prUrl ? ` PR=${state.prUrl}` : ''}`,
+      taskId,
+      ok: state.status !== 'failed' && state.status !== 'blocked',
+      payload: {
+        status: state.status,
+        modifiedPaths: Array.from(state.modifiedPaths || []),
+        prUrl: state.prUrl || null,
+      },
+    });
     return { ok: true };
   } catch (err) {
     console.error('[agentOrchestrator] _saveState failed:', err && err.message);
