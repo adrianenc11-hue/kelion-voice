@@ -1943,16 +1943,6 @@ export default function KelionStage() {
                         {/* Real-time task details: file + progress bar */}
                         {taskStatus && (status === 'thinking' || status === 'working') && (
                           <>
-                            {taskStatus.file && (
-                              <div style={{
-                                fontSize: 10, color: sc.color, opacity: 0.8,
-                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                                width: '100%', fontFamily: 'monospace', textTransform: 'none',
-                                letterSpacing: 0, fontWeight: 400,
-                              }}>
-                                📄 {taskStatus.file}
-                              </div>
-                            )}
                             <div style={{
                               width: '100%', height: 4, background: 'rgba(255,255,255,0.15)',
                               borderRadius: 2, overflow: 'hidden', marginTop: 2,

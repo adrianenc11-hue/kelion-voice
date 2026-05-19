@@ -862,7 +862,7 @@ function DevAgentPanel({ data, loading, error, onStart, onApprove, onRevert, bus
         </div>
         <div style={{ opacity: 0.70, marginBottom: 10, fontSize: 12 }}>
           Kelion planifică, modifică, validează și deploy-ui singur.
-          Narrative live — citește cu voce ce face la fiecare pas.
+          Lucrul ramane discret: status vizual, procent si aprobare umana pentru commit/push.
           Validare exhaustivă: sintaxă → securitate → lint → teste → build.
           Auto-repair: oprește → repară → reia. Aprobare obligatorie pentru commit.
         </div>
@@ -931,16 +931,9 @@ function DevAgentPanel({ data, loading, error, onStart, onApprove, onRevert, bus
                     </span>
                   </div>
 
-                  {/* Narrative timeline — voice-ready transcripts */}
-                  {isOpen && t.narratives && t.narratives.length > 0 && (
-                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${st.border}` }}>
-                      <div style={{ fontSize: 10, opacity: 0.6, marginBottom: 4 }}>🗣️ Narrative voice</div>
-                      {t.narratives.map((n, idx) => (
-                        <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 4 }}>
-                          <span style={{ opacity: 0.4, fontSize: 10, minWidth: 42 }}>{n.ts?.slice(11,16)}</span>
-                          <span style={{ color: '#e2e8f0' }}>{n.narrative}</span>
-                        </div>
-                      ))}
+                  {isOpen && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: `1px solid ${st.border}`, fontSize: 11, color: '#cbd5e1' }}>
+                      Detaliile interne sunt ascunse. Monitorul afiseaza doar starea, progresul si aprobarile necesare.
                     </div>
                   )}
 

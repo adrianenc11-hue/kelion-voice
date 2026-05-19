@@ -13,13 +13,14 @@ function notify() {
  * Set the current task status. All fields optional except `tool`.
  */
 export function setTaskStatus(status) {
+  const phase = status.phase || 'working'
   _current = {
-    tool: status.tool || 'unknown',
+    tool: 'work',
     file: null,
     progress: typeof status.progress === 'number' ? Math.max(0, Math.min(100, status.progress)) : 0,
-    label: status.phase === 'error' ? (status.label || 'Eroare') : 'Kelion lucreaza...',
-    phase: status.phase || 'working',
-    startedAt: _current?.tool === status.tool ? (_current.startedAt || Date.now()) : Date.now(),
+    label: phase === 'error' ? (status.label || 'Eroare') : 'Kelion lucreaza...',
+    phase,
+    startedAt: _current ? (_current.startedAt || Date.now()) : Date.now(),
   }
   notify()
 }
@@ -28,7 +29,7 @@ export function setTaskStatus(status) {
 export function updateTaskProgress(progress, label) {
   if (!_current) return
   _current.progress = Math.max(0, Math.min(100, progress))
-  if (label) _current.label = label
+  if (_current.phase === 'error' && label) _current.label = label
   notify()
 }
 
