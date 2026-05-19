@@ -87,6 +87,10 @@ initDb().then(async () => {
       const { initTasksTable } = require('./services/agentTasks');
       await initTasksTable();
       console.log('[kelion-startup] Agent tasks table initialized');
+      if (process.env.NODE_ENV !== 'test') {
+        const agentWorker = require('./services/agentWorker');
+        agentWorker.start();
+      }
     } catch (err) {
       console.warn('[kelion-startup] Agent tasks init failed:', err && err.message);
     }

@@ -92,6 +92,27 @@ async function getTasks(status = null) {
   return { ok: true, tasks: (rows || []).map(_hydrate) };
 }
 
+async function getRunnableTasks(limit = 3) {
+  const db = _db();
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 3, 10));
+  const rows = await db.all(
+    `SELECT * FROM agent_tasks
+     WHERE status IN ('not_started', 'queued', 'retry')
+     ORDER BY
+       CASE priority
+         WHEN 'urgent' THEN 0
+         WHEN 'high' THEN 1
+         WHEN 'normal' THEN 2
+         WHEN 'low' THEN 3
+         ELSE 4
+       END,
+       created_at ASC
+     LIMIT ?`,
+    [safeLimit]
+  );
+  return { ok: true, tasks: (rows || []).map(_hydrate) };
+}
+
 async function deleteTask(id) {
   const db = _db();
   await db.run(`DELETE FROM agent_tasks WHERE id = ?`, [id]);
@@ -140,4 +161,4 @@ async function initTasksTable() {
   }
 }
 
-module.exports = { createTask, updateTask, getTask, getTasks, deleteTask, initTasksTable };
+module.exports = { createTask, updateTask, getTask, getTasks, getRunnableTasks, deleteTask, initTasksTable };
