@@ -64,6 +64,85 @@ function providerName(card) {
   return card.providerLabel || card.name || known[id] || card.provider || card.id || 'Provider necunoscut'
 }
 
+function clampPct(value) {
+  if (!Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function providerGauge(card, split) {
+  const id = String(card?.id || card?.provider || card?.name || '').toLowerCase()
+  if (id.includes('openrouter') && split?.reserve) {
+    const available = Number(split.reserve.openrouterAvailableUsd)
+    const buffer = Number(split.reserve.minOpenRouterBufferUsd)
+    const percent = buffer > 0 ? clampPct((available / buffer) * 100) : null
+    return {
+      percent,
+      label: 'OpenRouter buffer',
+      value: Number.isFinite(available) && Number.isFinite(buffer)
+        ? `$${available.toFixed(2)} / $${buffer.toFixed(2)}`
+        : card?.balanceDisplay || 'neverificat',
+    }
+  }
+  const balance = Number(card?.balance)
+  const limit = Number(card?.balanceLimit || card?.limit || card?.quota || card?.minBuffer)
+  if (Number.isFinite(balance) && Number.isFinite(limit) && limit > 0) {
+    return {
+      percent: clampPct((balance / limit) * 100),
+      label: balanceLabel(card),
+      value: `${balance.toFixed(2)} / ${limit.toFixed(2)}`,
+    }
+  }
+  if (isOpenRouterUsageOnly(card)) {
+    return { percent: null, label: 'Sold real', value: 'neverificat' }
+  }
+  return { percent: null, label: balanceLabel(card), value: card?.balanceDisplay || 'neverificat' }
+}
+
+function CreditGauge({ percent, label, value, tone = 'ok', size = 76 }) {
+  const pct = percent == null ? 0 : clampPct(percent)
+  const toneColor = tone === 'error'
+    ? 'var(--admin-red)'
+    : tone === 'warn'
+      ? 'var(--admin-amber)'
+      : 'var(--admin-green)'
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 180 }}>
+      <div
+        aria-label={`${label}: ${percent == null ? 'neverificat' : `${pct}%`}`}
+        title={`${label}: ${value}`}
+        style={{
+          width: size,
+          height: size,
+          borderRadius: '50%',
+          background: `conic-gradient(${toneColor} ${pct * 3.6}deg, rgba(148,163,184,.18) 0deg)`,
+          display: 'grid',
+          placeItems: 'center',
+          boxShadow: `0 0 0 1px ${toneColor}33 inset`,
+          flex: '0 0 auto',
+        }}
+      >
+        <div style={{
+          width: size - 18,
+          height: size - 18,
+          borderRadius: '50%',
+          background: 'var(--admin-surface)',
+          display: 'grid',
+          placeItems: 'center',
+          fontWeight: 800,
+          fontSize: 13,
+          color: percent == null ? 'var(--admin-text-dim)' : toneColor,
+        }}>
+          {percent == null ? '?' : `${pct}%`}
+        </div>
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <div style={{ fontSize: 11, color: 'var(--admin-text-dim)', textTransform: 'uppercase', letterSpacing: '.06em' }}>{label}</div>
+        <div style={{ fontSize: 12, color: 'var(--admin-text)', wordBreak: 'break-word' }}>{value}</div>
+      </div>
+    </div>
+  )
+}
+
 export default function AiCreditsPage() {
   const { getCsrfToken } = useOutletContext()
   const toast = useToast()
@@ -146,10 +225,38 @@ export default function AiCreditsPage() {
         <div className="kpi-grid" style={{ marginBottom: 20 }}>
           <KpiCard icon="💰" label="Venit brut (30z)" value={split.revenue?.grossDisplay || '—'} accent="#10b981" />
           <KpiCard icon="🧠" label={`Alocare AI (${Math.round((split.fraction || 0.5) * 100)}%)`} value={split.allocation?.display || '—'} accent="#f472b6" />
-          <KpiCard icon="💸" label="Profit net" value={split.allocation?.ownerDisplay || '—'} accent="#a78bfa" />
+          <KpiCard icon="💸" label="Profit disponibil" value={split.allocation?.protectedOwnerDisplay || split.allocation?.ownerDisplay || '—'} accent="#a78bfa" />
         </div>
       )}
 
+      {split?.reserve && (
+        <div className="admin-card" style={{ marginBottom: 16 }}>
+          <div className="admin-card-header">
+            <div className="admin-card-title">AI reserve real</div>
+            <div style={{
+              color: split.reserve.ok ? 'var(--admin-green)' : 'var(--admin-amber)',
+              fontSize: 12,
+              fontWeight: 700,
+            }}>
+              {split.reserve.status || (split.reserve.ok ? 'acoperit' : 'sub buffer')}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 18, alignItems: 'center' }}>
+            <CreditGauge
+              percent={Number(split.reserve.minOpenRouterBufferUsd) > 0
+                ? (Number(split.reserve.openrouterAvailableUsd) / Number(split.reserve.minOpenRouterBufferUsd)) * 100
+                : null}
+              label="OpenRouter buffer"
+              value={`$${Number(split.reserve.openrouterAvailableUsd || 0).toFixed(2)} / $${Number(split.reserve.minOpenRouterBufferUsd || 0).toFixed(2)}`}
+              tone={split.reserve.ok ? 'ok' : 'warn'}
+              size={88}
+            />
+            <div style={{ fontSize: 13, color: 'var(--admin-text-dim)', maxWidth: 680 }}>
+              {split.reserve.message || 'Profitul devine retragibil doar dupa ce bufferul AI este acoperit.'}
+            </div>
+          </div>
+        </div>
+      )}
       {/* Auto-topup status */}
       {autoTopup && (
         <div className="admin-card" style={{ marginBottom: 16 }}>
@@ -186,6 +293,7 @@ export default function AiCreditsPage() {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {cards.map((card) => {
                 const st = friendlyStatus(card)
+                const gauge = providerGauge(card, split)
                 return (
                   <div key={card.id || card.provider || providerName(card)} style={{
                     padding: '16px 20px',
@@ -196,7 +304,7 @@ export default function AiCreditsPage() {
                     alignItems: 'center',
                     gap: 14,
                   }}>
-                    <span className={`status-dot ${st.tone === 'ok' ? 'online' : st.tone === 'error' ? 'offline' : 'warning'}`} />
+                    <CreditGauge percent={gauge.percent} label={gauge.label} value={gauge.value} tone={st.tone} />
                     <div style={{ flex: 1 }}>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>
                         {providerName(card)}
