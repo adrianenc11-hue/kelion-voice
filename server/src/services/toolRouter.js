@@ -126,6 +126,9 @@ const TOOL_CATEGORIES = {
     'diff_edit',
     'generate_mobile_app',
     'task_planner',
+    'parallel_tools',
+    'task_orchestrator',
+    'universal_executor',
   ],
 
   // GitHub
@@ -237,6 +240,7 @@ const TOOL_CATEGORIES = {
     'hardware_manager',
     'cloud_manager',
     'spice_simulate',
+    'system_bridge',
   ],
 
   // Natural disasters / science

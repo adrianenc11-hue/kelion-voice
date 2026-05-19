@@ -5191,6 +5191,22 @@ async function toolLearnNewSkill(args) {
 // 0.3E — self_evaluate: Run the agent capability tests and report status.
 async function toolSelfEvaluate(args) {
   const scope = String(args?.scope || 'agent-capabilities').trim().toLowerCase();
+  if (scope === 'tool-audit' || scope === 'autonomy' || scope === 'autonomy-readiness') {
+    const { runEnvAudit } = require('./envAudit');
+    const audit = await runEnvAudit();
+    return {
+      ok: true,
+      scope,
+      autonomy_ready: audit.autonomy.ready,
+      autonomy_blockers: audit.autonomy.blockers,
+      tool_audit: audit.toolAudit,
+      human_decision_gates: audit.toolAudit?.humanDecisionGates || [],
+      summary: audit.autonomy.ready
+        ? 'Kelion autonomy prerequisites are ready; human decisions still gate merge/payout/destructive actions.'
+        : `Kelion autonomy is not ready: ${audit.autonomy.blockers.length} blocker(s) remain.`,
+    };
+  }
+
   let pattern;
   if (scope === 'all') pattern = '';
   else if (scope === 'agent-capabilities') pattern = 'agent-capabilities';
@@ -5814,13 +5830,15 @@ const ADMIN_ONLY_TOOLS = new Set([
   // Repo / GitHub mutation
   'commit_and_push_to_github', 'create_github_pr', 'manage_github_prs',
   // Multi-step orchestration that can call any of the above
-  'execute_plan',
+  'execute_plan', 'parallel_tools', 'task_orchestrator',
   // Database direct access
   'query_database',
   // Process management / npm
   'check_updates', 'auto_test', 'run_agent_eval', 'self_evaluate',
   'auto_install_dependency', 'auto_update_dependencies', 'learn_new_skill',
   'verify_build', 'diff_edit',
+  // Connector management can install/start external tool servers.
+  'mcp_protocol',
   // Catch-all "do anything" tools
   'computer_use', 'system_bridge', 'universal_executor',
   'automation_engine', 'devops_toolkit',

@@ -6,6 +6,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const { URL } = require('url');
+const { runToolAudit } = require('./toolAudit');
 
 function fetchJson(url, opts = {}) {
   return new Promise((resolve) => {
@@ -195,7 +196,9 @@ async function checkSessionSecrets() {
 }
 
 async function runEnvAudit() {
-  const results = await Promise.all([
+  const [toolAudit, results] = await Promise.all([
+    Promise.resolve().then(() => runToolAudit()),
+    Promise.all([
     checkOpenRouter(),
     checkElevenLabs(),
     checkStripe(),
@@ -209,20 +212,31 @@ async function runEnvAudit() {
     checkMasterBranchProtection(),
     checkDatabaseUrl(),
     checkSessionSecrets(),
+    ]),
   ]);
   const fail = results.filter(r => !r.ok).length;
   const autonomyRequired = results.filter(r => r.requiredForAutonomy);
   const autonomyBlockers = autonomyRequired.filter(r => !r.ok);
+  const toolBlockers = (toolAudit.blockers || []).map(r => ({
+    name: `Tool: ${r.name}`,
+    error: r.action || r.type || 'tool not ready',
+  }));
+  const allAutonomyBlockers = [
+    ...autonomyBlockers.map(r => ({ name: r.name, error: r.error || r.note || 'not ready' })),
+    ...toolBlockers,
+  ];
   return {
     results,
     allOk: fail === 0,
     fail,
     total: results.length,
+    toolAudit,
     autonomy: {
-      ready: autonomyBlockers.length === 0,
-      fail: autonomyBlockers.length,
-      total: autonomyRequired.length,
-      blockers: autonomyBlockers.map(r => ({ name: r.name, error: r.error || r.note || 'not ready' })),
+      ready: allAutonomyBlockers.length === 0,
+      fail: allAutonomyBlockers.length,
+      total: autonomyRequired.length + (toolAudit.autonomyRequired || []).length,
+      blockers: allAutonomyBlockers,
+      toolReadinessPercent: toolAudit.readinessPercent,
     },
   };
 }
