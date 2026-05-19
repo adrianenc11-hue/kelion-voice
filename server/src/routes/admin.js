@@ -57,6 +57,68 @@ function _pruneAlertCooldown(now) {
   }
 }
 
+async function summarizeUserPayments(userId) {
+  const rows = await listCreditTransactions(userId, 200).catch(() => []);
+  const topups = Array.isArray(rows) ? rows.filter((r) => r && r.kind === 'topup') : [];
+  const revenueByCurrency = new Map();
+  let minutesBought = 0;
+  let lastTopupAt = null;
+  for (const tx of topups) {
+    minutesBought += Math.max(0, Number(tx.delta_minutes) || 0);
+    const cents = Number(tx.amount_cents) || 0;
+    const currency = String(tx.currency || 'gbp').toLowerCase();
+    revenueByCurrency.set(currency, (revenueByCurrency.get(currency) || 0) + cents);
+    const created = tx.created_at ? new Date(tx.created_at).getTime() : 0;
+    if (created && (!lastTopupAt || created > new Date(lastTopupAt).getTime())) {
+      lastTopupAt = tx.created_at;
+    }
+  }
+  const primaryCurrency = revenueByCurrency.keys().next().value || 'gbp';
+  const revenueCents = revenueByCurrency.get(primaryCurrency) || 0;
+  return {
+    paid: topups.length > 0,
+    topups: topups.length,
+    minutesBought,
+    revenueCents,
+    revenueCurrency: primaryCurrency,
+    lastTopupAt,
+  };
+}
+
+function serializeAdminUser(u, balance, payment = {}) {
+  const authProvider = u.google_id ? 'google' : 'local';
+  const displayName = u.name || null;
+  const balanceMinutes = Number(balance ?? u.credits_balance_minutes ?? 0);
+  return {
+    id: u.id,
+    email: u.email,
+    name: u.name,
+    displayName,
+    role: u.role,
+    subscription_tier: u.subscription_tier,
+    subscription_status: u.subscription_status,
+    usage_today: u.usage_today,
+    referral_code: u.referral_code,
+    stripe_customer_id: u.stripe_customer_id || null,
+    banned: Number(u.banned) === 1,
+    banned_reason: u.banned_reason || null,
+    banned_at: u.banned_at || null,
+    credits_balance_minutes: balanceMinutes,
+    balanceMinutes,
+    provider: authProvider,
+    created_at: u.created_at,
+    createdAt: u.created_at,
+    updated_at: u.updated_at,
+    updatedAt: u.updated_at,
+    paid: Boolean(payment.paid),
+    topups: Number(payment.topups || 0),
+    minutesBought: Number(payment.minutesBought || 0),
+    revenueCents: Number(payment.revenueCents || 0),
+    revenueCurrency: payment.revenueCurrency || 'gbp',
+    lastTopupAt: payment.lastTopupAt || null,
+  };
+}
+
 /**
  * GET /api/admin/business
  * Live business-health snapshot: credit top-up revenue (from ledger) and
@@ -450,23 +512,10 @@ router.get('/users', async (req, res) => {
 
     const balancePromises = filtered.slice(0, limit).map(async (u) => {
       let balance = null;
+      let payment = {};
       try { balance = await getCreditsBalance(u.id); } catch (_) { balance = null; }
-      return {
-        id: u.id,
-        email: u.email,
-        name: u.name,
-        role: u.role,
-        subscription_tier: u.subscription_tier,
-        subscription_status: u.subscription_status,
-        usage_today: u.usage_today,
-        referral_code: u.referral_code,
-        stripe_customer_id: u.stripe_customer_id || null,
-        banned: Number(u.banned) === 1,
-        banned_reason: u.banned_reason || null,
-        banned_at: u.banned_at || null,
-        credits_balance_minutes: balance,
-        created_at: u.created_at,
-      };
+      try { payment = await summarizeUserPayments(u.id); } catch (_) { payment = {}; }
+      return serializeAdminUser(u, balance, payment);
     });
     const sanitized = await Promise.all(balancePromises);
 
@@ -595,27 +644,15 @@ router.get('/users/:id', async (req, res) => {
     }
 
     let balance = null;
+    let payment = {};
     try { balance = await getCreditsBalance(user.id); } catch (_) { balance = null; }
+    try { payment = await summarizeUserPayments(user.id); } catch (_) { payment = {}; }
 
     res.json({
-      id: user.id,
-      email: user.email,
-      name: user.name,
+      ...serializeAdminUser(user, balance, payment),
       picture: user.picture,
-      role: user.role,
-      subscription_tier: user.subscription_tier,
-      subscription_status: user.subscription_status,
-      usage_today: user.usage_today,
       usage_reset_date: user.usage_reset_date,
-      referral_code: user.referral_code,
       referred_by: user.referred_by,
-      stripe_customer_id: user.stripe_customer_id,
-      banned: Number(user.banned) === 1,
-      banned_reason: user.banned_reason || null,
-      banned_at: user.banned_at || null,
-      credits_balance_minutes: balance,
-      created_at: user.created_at,
-      updated_at: user.updated_at,
     });
   } catch (err) {
     console.error('[admin/users/:id] Error:', err.message);

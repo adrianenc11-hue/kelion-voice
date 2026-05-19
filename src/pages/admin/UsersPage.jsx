@@ -203,6 +203,14 @@ export default function UsersPage() {
     }
   }, [selected, getCsrfToken, loadDetail, toast])
 
+  const formatMoney = (cents = 0, currency = 'gbp') => {
+    const amount = (Number(cents) || 0) / 100
+    return new Intl.NumberFormat('ro-RO', {
+      style: 'currency',
+      currency: String(currency || 'gbp').toUpperCase(),
+    }).format(amount)
+  }
+
   const columns = [
     {
       key: 'email',
@@ -243,6 +251,34 @@ export default function UsersPage() {
           {v ?? 0}
         </span>
       ),
+    },
+    {
+      key: 'paid',
+      label: 'Plata',
+      render: (v, row) => (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+          <span className={`admin-badge ${v ? 'green' : 'red'}`}>
+            {v ? 'Platitor' : 'Fara plata'}
+          </span>
+          <span style={{ fontSize: 11, color: 'var(--admin-text-dim)' }}>
+            {row.topups || 0} top-up
+          </span>
+        </div>
+      ),
+    },
+    {
+      key: 'revenueCents',
+      label: 'Venit',
+      render: (v, row) => (
+        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: row.paid ? 700 : 500 }}>
+          {formatMoney(v, row.revenueCurrency)}
+        </span>
+      ),
+    },
+    {
+      key: 'lastTopupAt',
+      label: 'Ultima plata',
+      render: (v) => v ? new Date(v).toLocaleDateString('ro-RO') : '—',
     },
     {
       key: 'provider',
@@ -405,6 +441,15 @@ export default function UsersPage() {
                   </span>
                 } />
                 <InfoRow label="Credit" value={`${selected.user.balanceMinutes ?? 0} minute`} />
+                <InfoRow label="Plata" value={
+                  <span className={`admin-badge ${selected.user.paid ? 'green' : 'red'}`}>
+                    {selected.user.paid ? 'Platitor' : 'Fara plata'}
+                  </span>
+                } />
+                <InfoRow label="Top-up-uri" value={`${selected.user.topups || 0} · ${formatMoney(selected.user.revenueCents, selected.user.revenueCurrency)}`} />
+                <InfoRow label="Ultima plata" value={
+                  selected.user.lastTopupAt ? new Date(selected.user.lastTopupAt).toLocaleString('ro-RO') : '—'
+                } />
                 <InfoRow label="Rol" value={
                   <span className={`admin-badge ${selected.user.role === 'admin' ? 'purple' : 'blue'}`}>
                     {selected.user.role || 'user'}
