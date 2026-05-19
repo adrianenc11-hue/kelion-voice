@@ -15,6 +15,7 @@ const agentTasks = require('../services/agentTasks');
 const agentOrchestrator = require('../services/agentOrchestrator');
 const agentSandbox = require('../services/agentSandbox');
 const autonomySupervisor = require('../services/autonomySupervisor');
+const agentWorker = require('../services/agentWorker');
 const { isPathAllowed: _isPathAllowed, isShellAllowed: _isShellAllowed } = agentOrchestrator;
 
 const router = Router();
@@ -381,6 +382,20 @@ router.get('/tasks', async (req, res) => {
   } catch (err) {
     console.error('[agent/tasks/list]', err && err.message);
     res.status(500).json({ error: 'Task list failed' });
+  }
+});
+
+router.get('/worker/status', (_req, res) => {
+  res.json(agentWorker.getStatus());
+});
+
+router.post('/worker/tick', async (_req, res) => {
+  try {
+    const result = await agentWorker.tick();
+    res.status(result.ok ? 200 : 428).json(result);
+  } catch (err) {
+    console.error('[agent/worker/tick]', err && err.message);
+    res.status(500).json({ ok: false, error: 'Worker tick failed' });
   }
 });
 
