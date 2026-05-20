@@ -24,6 +24,7 @@
  */
 
 const config = require('../config');
+const { buildProviderRecommendation } = require('./alertRecommendations');
 
 const DEFAULT_TIMEOUT_MS = 8000;
 
@@ -314,11 +315,19 @@ async function getAllCredits() {
     probeStripe(),
     probeRailway(),
   ]);
-  return [openrouter, elevenlabs, stripe, railway].map((card) => ({
-    ...card,
-    provider: card.id,
-    providerLabel: card.name || card.id,
-  }));
+  return [openrouter, elevenlabs, stripe, railway].map((card) => {
+    const normalized = {
+      ...card,
+      provider: card.id,
+      providerLabel: card.name || card.id,
+    };
+    return {
+      ...normalized,
+      recommendation: buildProviderRecommendation(normalized, {
+        thresholdUsd: Number(process.env.AI_MIN_OPENROUTER_BUFFER_USD || 10),
+      }),
+    };
+  });
 }
 
 /**

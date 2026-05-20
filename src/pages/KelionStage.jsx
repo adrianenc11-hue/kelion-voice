@@ -3733,6 +3733,7 @@ export default function KelionStage() {
             // "credit aproape terminat" / "cheie lipsa" instead of
             // parsing `123,456 / 500,000 chars` every time.
             const friendly = friendlyCreditStatus(c, isAdmin)
+            const recommendation = c?.recommendation?.action || c?.recommendation?.summary || null
             const headlineColor = ({
               ok: '#bbf7d0', warn: '#fde68a', error: '#fecaca', muted: '#e2e8f0',
             })[friendly.tone] || '#ede9fe'
@@ -3792,6 +3793,19 @@ export default function KelionStage() {
                 {c.message && c.status !== 'ok' && (
                   <div style={{ fontSize: 10, opacity: 0.55, marginTop: 4 }}>
                     {c.message}
+                  </div>
+                )}
+                {recommendation && (
+                  <div style={{
+                    fontSize: 11,
+                    marginTop: 8,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: 'rgba(15, 23, 42, 0.42)',
+                    border: '1px solid rgba(148, 163, 184, 0.18)',
+                    color: '#ede9fe',
+                  }}>
+                    Recomandare admin: {recommendation}
                   </div>
                 )}
                 <div style={{
