@@ -22,6 +22,7 @@ const {
 const { requireAuth, requireAdmin } = require('../middleware/auth');
 const { getAllCredits, probeStripe, buildRevenueSplit } = require('../services/aiCredits');
 const { sendEmailAlert } = require('../services/emailAlerts');
+const { buildProviderRecommendation, formatRecommendationText } = require('../services/alertRecommendations');
 const { bootstrapAdmin } = require('../services/adminBootstrap');
 const autoTopup = require('../services/autoTopup');
 const payoutsService = require('../services/payouts');
@@ -433,12 +434,14 @@ router.get('/credits', async (req, res) => {
       const last = _alertCooldown.get(c.id) || 0;
       if (now - last < ALERT_COOLDOWN_MS) continue;
       _alertCooldown.set(c.id, now);
+      const recommendation = c.recommendation || buildProviderRecommendation(c, { thresholdUsd: LOW_BALANCE_THRESHOLD_USD });
       sendEmailAlert({
         subject: `[Kelion] ${c.name} credit ${c.status === 'low' ? 'LOW' : 'ERROR'}`,
         text: [
           `${c.name} — ${c.status.toUpperCase()}`,
           `Balance: ${c.balanceDisplay}`,
           c.message ? `Detail: ${c.message}` : '',
+          formatRecommendationText(recommendation),
           `Top up: ${c.topUpUrl}`,
         ].filter(Boolean).join('\n'),
       }).catch((err) => {
@@ -1137,16 +1140,20 @@ async function checkProviderBalances() {
       if (bal < LOW_BALANCE_THRESHOLD_USD && Date.now() - lastAlert > 60 * 60 * 1000) {
         _lastAlertMap[card.id] = Date.now();
         console.warn(`[watchdog] Low balance: ${card.name || card.id} = $${bal.toFixed(2)}`);
+        const recommendation = card.recommendation || buildProviderRecommendation(card, { thresholdUsd: LOW_BALANCE_THRESHOLD_USD });
         const title = `Low credit: ${card.name || card.id}`;
-        const body = `Balance: $${bal.toFixed(2)} (protected buffer: $${LOW_BALANCE_THRESHOLD_USD}). Top up before profit payout.`;
-        await sendAdminAlert({ title, body, url: card.topUpUrl || '/' });
+        const body = [
+          `Balance: $${bal.toFixed(2)} (protected buffer: $${LOW_BALANCE_THRESHOLD_USD}).`,
+          recommendation.action || 'Review provider billing.',
+        ].filter(Boolean).join(' ');
+        await sendAdminAlert({ title, body, url: recommendation.url || card.topUpUrl || '/', recommendation });
         sendEmailAlert({
           subject: `[Kelion] ${title}`,
           text: [
             body,
             `Provider: ${card.name || card.id}`,
             `Top up: ${card.topUpUrl || 'https://openrouter.ai/settings/credits'}`,
-            'Profit payout is blocked until the AI reserve is covered.',
+            formatRecommendationText(recommendation),
           ].join('\n'),
         }).catch((err) => console.warn('[watchdog] low-balance email failed:', err && err.message));
       }

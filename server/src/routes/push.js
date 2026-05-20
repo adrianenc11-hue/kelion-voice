@@ -131,7 +131,7 @@ router.post('/test', async (req, res) => {
 // ─── Admin Alerts ───────────────────────────────────────────
 // Push a notification to all admin users. Used by the provider
 // balance watchdog and other server-side checks.
-async function sendAdminAlert({ title, body, url }) {
+async function sendAdminAlert({ title, body, url, recommendation }) {
   const { isAdminEmail } = require('../middleware/optionalAuth');
   const { listActivePushSubscriptions } = require('../db');
   try {
@@ -144,6 +144,7 @@ async function sendAdminAlert({ title, body, url }) {
       title: title || 'Kelion Admin Alert',
       body:  body  || '',
       url:   url   || '/',
+      recommendation: recommendation || null,
     });
     let sent = 0;
     for (const s of allSubs) {

@@ -98,6 +98,17 @@ function providerGauge(card, split) {
   return { percent: null, label: balanceLabel(card), value: card?.balanceDisplay || 'neverificat' }
 }
 
+function recommendationFor(card) {
+  const r = card?.recommendation
+  if (!r) return null
+  return {
+    summary: r.summary || '',
+    action: r.action || '',
+    impact: r.impact || '',
+    nextSteps: Array.isArray(r.nextSteps) ? r.nextSteps.slice(0, 4) : [],
+  }
+}
+
 function CreditGauge({ percent, label, value, tone = 'ok', size = 76 }) {
   const pct = percent == null ? 0 : clampPct(percent)
   const toneColor = tone === 'error'
@@ -294,6 +305,7 @@ export default function AiCreditsPage() {
               {cards.map((card) => {
                 const st = friendlyStatus(card)
                 const gauge = providerGauge(card, split)
+                const rec = recommendationFor(card)
                 return (
                   <div key={card.id || card.provider || providerName(card)} style={{
                     padding: '16px 20px',
@@ -320,6 +332,27 @@ export default function AiCreditsPage() {
                       {card.message && (
                         <div style={{ fontSize: 11, color: 'var(--admin-text-muted)', marginTop: 2 }}>
                           {card.message}
+                        </div>
+                      )}
+                      {rec && (rec.action || rec.summary) && (
+                        <div style={{
+                          marginTop: 10,
+                          padding: '10px 12px',
+                          borderRadius: 8,
+                          background: 'rgba(15, 23, 42, 0.36)',
+                          border: '1px solid rgba(148, 163, 184, 0.18)',
+                        }}>
+                          <div style={{ fontSize: 11, color: 'var(--admin-text-dim)', textTransform: 'uppercase', letterSpacing: '.06em', marginBottom: 4 }}>
+                            Recomandare admin
+                          </div>
+                          <div style={{ fontSize: 12, color: 'var(--admin-text)' }}>
+                            {rec.action || rec.summary}
+                          </div>
+                          {rec.impact && (
+                            <div style={{ fontSize: 11, color: 'var(--admin-text-dim)', marginTop: 4 }}>
+                              Impact: {rec.impact}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
